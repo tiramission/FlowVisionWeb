@@ -3,8 +3,10 @@ import { ChevronLeft, ChevronRight, Maximize, X, ZoomIn, ZoomOut } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useFileUrl } from '@/hooks/useFileUrl'
+import { usePreviewUrl, useThumbUrl } from '@/hooks/useThumbUrl'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
 import { dirKey } from '@/lib/fs/directory'
+import { DIRECT_EXTS, PREVIEW_MAX_SIDE, previewCache } from '@/lib/thumb/cache'
 import { clearVideoPos, getVideoPos, setVideoPos } from '@/lib/video/position'
 import { useAppStore } from '@/store/useAppStore'
 
@@ -64,6 +66,34 @@ export function Viewer() {
   // 滚轮等非 React 事件里读取最新视图状态
   const viewRef = useRef({ scale: 1, offset: { x: 0, y: 0 } })
   viewRef.current = { scale, offset }
+
+  // 超大图两级加载：缩略图(768)秒开 → 预览(2560) → 缩放超过预览分辨率才解码全图。
+  // 仅对「尺寸已知且最长边 > 2560」的位图启用（GIF/SVG/小图/未知尺寸走单层直连）
+  const previewable = !!file && file.type === 'image' && !DIRECT_EXTS.has(file.ext)
+    && !!file.width && !!file.height && Math.max(file.width, file.height) > PREVIEW_MAX_SIDE
+  const thumb = useThumbUrl(previewable ? file : null)
+  const preview = usePreviewUrl(previewable ? file : null)
+  const fullUrl = useFileUrl(previewable ? file.handle : null) // 仅创建 URL，渲染才解码
+  const [fullOn, setFullOn] = useState(false) // 是否需要全图层（缩放超阈值，带迟滞防抖动）
+  const [fullReady, setFullReady] = useState(false) // 全图是否解码完成（淡入）
+  useEffect(() => { setFullOn(false); setFullReady(false) }, [file?.id])
+
+  // 预览档能支撑的最大缩放 = 预览长边 / 原图长边；超过 5% 即需全图，缩回 95% 以下释放
+  const capScale = file?.width && file?.height ? PREVIEW_MAX_SIDE / Math.max(file.width, file.height) : Infinity
+  useEffect(() => {
+    if (!previewable) return
+    if (scale > capScale * 1.05) setFullOn(true)
+    else if (scale < capScale * 0.95) setFullOn(false)
+  }, [scale, capScale, previewable])
+
+  // 邻图预览预加载：翻图时下一张/上一张的预览层已就绪
+  useEffect(() => {
+    if (!file || !previewable) return
+    const t = window.setTimeout(() => {
+      previewCache.preload([files[index - 1], files[index + 1]].filter(Boolean))
+    }, 300)
+    return () => window.clearTimeout(t)
+  }, [file?.id, index, files, previewable])
 
   const fitScale = () => {
     const el = canvasRef.current
@@ -317,7 +347,52 @@ export function Viewer() {
                 }}
               />
             )
-            : url && (
+            : previewable && natural ? (
+              // 三层堆叠：缩略图秒开 → 预览 → 缩放超阈值后全图淡入。
+              // 同宽高比，外层 transform 数学对三层一致，替换无缝。
+              // 不依赖全图 URL，首帧不等原图读取
+              <div className="relative" style={explicitSize(natural)}>
+                {thumb.url && (
+                  <img
+                    src={thumb.url}
+                    alt={file.name}
+                    draggable={false}
+                    decoding="async"
+                    className="absolute inset-0 h-full w-full"
+                  />
+                )}
+                {preview.url && (
+                  <img
+                    src={preview.url}
+                    alt={file.name}
+                    draggable={false}
+                    decoding="async"
+                    className="absolute inset-0 h-full w-full"
+                  />
+                )}
+                {fullOn && fullUrl && (
+                  <img
+                    src={fullUrl}
+                    alt={file.name}
+                    draggable={false}
+                    decoding="async"
+                    className="absolute inset-0 h-full w-full transition-opacity duration-300"
+                    style={{ opacity: fullReady ? 1 : 0 }}
+                    ref={el => {
+                      // onLoad 可能错过挂载前已完成的加载，ref 挂载时补检一次
+                      if (el && el.complete && el.naturalWidth > 0) setFullReady(true)
+                    }}
+                    onLoad={e => {
+                      const img = e.currentTarget
+                      setFullReady(true)
+                      if (img.naturalWidth > 0) {
+                        useAppStore.getState().reportSize(file.id, img.naturalWidth, img.naturalHeight)
+                      }
+                    }}
+                  />
+                )}
+              </div>
+            ) : url && (
               <img
                 src={url}
                 alt={file.name}

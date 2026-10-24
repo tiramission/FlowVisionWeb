@@ -3,17 +3,12 @@ import { idbGetThumb, idbPutThumb } from './idb'
 
 /** 缩略图最长边（覆盖最大列宽 384px × 2x DPR） */
 export const THUMB_MAX_SIDE = 768
-/** 内存缓存字节上限（仅统计生成的小图 blob；对标原版 memUseLimit 的缩略图部分） */
-const MEMORY_CAP_BYTES = 64 << 20
-/** 内存缓存条目上限（含小图直连的对象 URL 条目） */
-const MEMORY_MAX_ENTRIES = 600
-/** 生成并发数（对标原版 thumbThreadNum，浏览器侧重解码内存适当调低） */
-const CONCURRENCY = 4
+/** 大图查看器预览层最长边（覆盖 2K/4K 屏显示 + retina；缩放超过此档才解码全图） */
+export const PREVIEW_MAX_SIDE = 2560
 /** 滚动方向预加载窗口（对标原版 PRELOAD_THUMB_RANGE_PRE / NEXT） */
 export const PRELOAD_PRE = 20
 export const PRELOAD_NEXT = 40
 
-const KEY_PREFIX = 'v1'
 const WEBP_QUALITY = 0.82
 
 /** 这些类型不生成缩略图：GIF 保留动画，SVG 无法 createImageBitmap，直接引用原文件 */
@@ -31,34 +26,46 @@ export interface ThumbStats {
   evicted: number
 }
 
+export interface ThumbCacheConfig {
+  /** 生成图最长边 */
+  maxSide: number
+  /** 缓存键前缀（不同档位隔离，含格式版本号） */
+  keyPrefix: string
+  /** 内存缓存字节上限 */
+  capBytes: number
+  /** 内存缓存条目上限 */
+  maxEntries: number
+  /** 生成并发数 */
+  concurrency: number
+}
+
 interface Entry {
   url: string
   /** 生成的小图 blob 大小；直连原文件的条目记 0（原文件由句柄按需读取，不占缓存内存） */
   bytes: number
 }
 
-function cacheKeyOf(f: FileModel): string {
-  return `${KEY_PREFIX}:${f.relPath}:${f.size}:${f.lastModified}`
-}
-
 /** 解码并缩放到最长边 maxSide，编码为 webp；webp 不可用时返回 null */
-async function decodeScaled(file: File, known: { w: number; h: number } | null): Promise<Blob | null> {
+async function decodeScaled(file: File, known: { w: number; h: number } | null, maxSide: number): Promise<Blob | null> {
+  // 原图超过 maxSide 才走缩放解码（Chrome 对 JPEG 分级采样，不物化全尺寸位图）
+  const needsResize = !!known && Math.max(known.w, known.h) > maxSide
   let bmp: ImageBitmap
-  if (known && Math.max(known.w, known.h) > THUMB_MAX_SIDE) {
+  if (needsResize) {
     // 只给一边时浏览器按比例缩放另一边
-    const opts: ImageBitmapOptions = known.w >= known.h
-      ? { resizeWidth: THUMB_MAX_SIDE, imageOrientation: 'from-image' }
-      : { resizeHeight: THUMB_MAX_SIDE, imageOrientation: 'from-image' }
+    const opts: ImageBitmapOptions = known!.w >= known!.h
+      ? { resizeWidth: maxSide, imageOrientation: 'from-image' }
+      : { resizeHeight: maxSide, imageOrientation: 'from-image' }
     bmp = await createImageBitmap(file, opts)
   } else {
     bmp = await createImageBitmap(file, { imageOrientation: 'from-image' })
   }
   try {
-    if (bmp.width <= THUMB_MAX_SIDE && bmp.height <= THUMB_MAX_SIDE) {
-      // 小图无需缩放重编码，调用方直接引用原文件
+    // 仅未缩放的分支才可能是真·小图；缩放分支结果恰好等于 maxSide，
+    // 不能用 <= maxSide 判断（会把缩放结果误判为小图而直连原图）
+    if (!needsResize && bmp.width <= maxSide && bmp.height <= maxSide) {
       return null
     }
-    const scale = THUMB_MAX_SIDE / Math.max(bmp.width, bmp.height)
+    const scale = maxSide / Math.max(bmp.width, bmp.height)
     const tw = Math.max(1, Math.round(bmp.width * scale))
     const th = Math.max(1, Math.round(bmp.height * scale))
     if (typeof OffscreenCanvas !== 'undefined') {
@@ -80,7 +87,8 @@ async function decodeScaled(file: File, known: { w: number; h: number } | null):
   }
 }
 
-class ThumbCache {
+export class ThumbCache {
+  private cfg: ThumbCacheConfig
   /** 插入序即 LRU 序（touch 时 delete+set 移到末尾） */
   private memory = new Map<string, Entry>()
   /** 条目引用计数：可视区挂载中的条目不可淘汰 */
@@ -96,9 +104,17 @@ class ThumbCache {
     hits: 0, misses: 0, generated: 0, persistedHits: 0, preloaded: 0, evicted: 0,
   }
 
+  constructor(cfg: ThumbCacheConfig) {
+    this.cfg = cfg
+  }
+
+  private cacheKeyOf(f: FileModel): string {
+    return `${this.cfg.keyPrefix}:${f.relPath}:${f.size}:${f.lastModified}`
+  }
+
   /** 订阅一个文件的缩略图；命中内存时同步回调。返回取消引用函数 */
   acquire(f: FileModel, onReady: (url: string | null) => void): () => void {
-    const key = cacheKeyOf(f)
+    const key = this.cacheKeyOf(f)
     this.refs.set(key, (this.refs.get(key) ?? 0) + 1)
     const entry = this.memory.get(key)
     if (entry) {
@@ -122,7 +138,7 @@ class ThumbCache {
   preload(files: readonly FileModel[]): void {
     for (const f of files) {
       if (f.type !== 'image' || !f.handle) continue
-      const key = cacheKeyOf(f)
+      const key = this.cacheKeyOf(f)
       if (this.memory.has(key) || this.inflight.has(key) || this.queuedKeys.has(key)) continue
       this.queuedKeys.add(key)
       this.lo.push(() => {
@@ -136,7 +152,7 @@ class ThumbCache {
   }
 
   private ensure(f: FileModel): Promise<Entry | null> {
-    const key = cacheKeyOf(f)
+    const key = this.cacheKeyOf(f)
     const running = this.inflight.get(key)
     if (running) return running
     const p = new Promise<Entry | null>(resolve => {
@@ -159,10 +175,10 @@ class ThumbCache {
 
   private async generate(f: FileModel): Promise<Entry | null> {
     if (!f.handle) return null
-    const key = cacheKeyOf(f)
+    const key = this.cacheKeyOf(f)
     const known = f.width && f.height ? { w: f.width, h: f.height } : null
     // 大图先查持久缓存
-    if (!known || Math.max(known.w, known.h) > THUMB_MAX_SIDE) {
+    if (!known || Math.max(known.w, known.h) > this.cfg.maxSide) {
       const cached = await idbGetThumb(key)
       if (cached) {
         this.stats.persistedHits++
@@ -171,7 +187,7 @@ class ThumbCache {
     }
     const file = await f.handle.getFile()
     try {
-      const blob = await decodeScaled(file, known)
+      const blob = await decodeScaled(file, known, this.cfg.maxSide)
       if (blob === null) {
         // 小图或 webp 不可用：直接引用原文件
         return { url: URL.createObjectURL(file), bytes: 0 }
@@ -194,9 +210,9 @@ class ThumbCache {
 
   /** 内存上限管理：超出字节/条目上限时从最旧开始淘汰未被引用的条目 */
   private sweep(): void {
-    if (this.totalBytes <= MEMORY_CAP_BYTES && this.memory.size <= MEMORY_MAX_ENTRIES) return
+    if (this.totalBytes <= this.cfg.capBytes && this.memory.size <= this.cfg.maxEntries) return
     for (const [key, entry] of this.memory) {
-      if (this.totalBytes <= MEMORY_CAP_BYTES && this.memory.size <= MEMORY_MAX_ENTRIES) break
+      if (this.totalBytes <= this.cfg.capBytes && this.memory.size <= this.cfg.maxEntries) break
       if ((this.refs.get(key) ?? 0) > 0) continue
       URL.revokeObjectURL(entry.url)
       this.totalBytes -= entry.bytes
@@ -207,7 +223,7 @@ class ThumbCache {
   }
 
   private pump(): void {
-    while (this.activeCount < CONCURRENCY) {
+    while (this.activeCount < this.cfg.concurrency) {
       const task = this.hi.shift() ?? this.lo.shift()
       if (!task) break
       this.activeCount++
@@ -223,4 +239,20 @@ class ThumbCache {
   }
 }
 
-export const thumbCache = new ThumbCache()
+// 画廊缩略图档（768px，覆盖列宽 × 2x DPR）
+export const thumbCache = new ThumbCache({
+  maxSide: THUMB_MAX_SIDE,
+  keyPrefix: 'v1',
+  capBytes: 64 << 20,
+  maxEntries: 600,
+  concurrency: 4,
+})
+
+// 大图查看器预览档（2560px；查看器只常驻当前图与邻图，缓存更小）
+export const previewCache = new ThumbCache({
+  maxSide: PREVIEW_MAX_SIDE,
+  keyPrefix: 'p1',
+  capBytes: 32 << 20,
+  maxEntries: 24,
+  concurrency: 2,
+})
