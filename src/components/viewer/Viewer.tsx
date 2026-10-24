@@ -95,6 +95,27 @@ export function Viewer() {
     return () => window.clearTimeout(t)
   }, [file?.id, index, files, previewable])
 
+  // 实时层级标注：顶层可见的渲染层（全图层挂载但解码中仍算预览层在显示）
+  const layerBadge = (() => {
+    if (!file || file.type === 'video') return null
+    if (!previewable) {
+      return { text: '原图直连', tip: '小图/GIF/SVG/未知尺寸，直接解码原图显示', cls: 'bg-zinc-500/25 text-zinc-200' }
+    }
+    if (fullOn && fullReady) {
+      return { text: 'L3 原图', tip: '原图已解码，完整分辨率显示', cls: 'bg-emerald-500/25 text-emerald-300' }
+    }
+    if (fullOn) {
+      return { text: 'L2 预览 · 解码原图', tip: '已放大超过预览档分辨率，原图后台解码中，完成后淡入替换', cls: 'bg-sky-500/25 text-sky-300' }
+    }
+    if (preview.url) {
+      return { text: 'L2 预览 2560px', tip: '预览层显示（放大超过阈值会自动切换原图）', cls: 'bg-sky-500/25 text-sky-300' }
+    }
+    if (thumb.url) {
+      return { text: 'L1 缩略图 768px', tip: '预览生成中，暂以缩略图显示', cls: 'bg-amber-500/25 text-amber-300' }
+    }
+    return { text: '加载中…', tip: '正在读取文件', cls: 'bg-zinc-500/25 text-zinc-200' }
+  })()
+
   const fitScale = () => {
     const el = canvasRef.current
     if (!el || !natural) return 1
@@ -225,6 +246,14 @@ export function Viewer() {
       >
         <span className="min-w-0 truncate text-sm" title={file.name}>{file.name}</span>
         {natural && <span className="shrink-0 text-xs text-white/60">{natural.width}×{natural.height}</span>}
+        {layerBadge && (
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${layerBadge.cls}`}
+            title={`当前渲染层级：${layerBadge.tip}`}
+          >
+            {layerBadge.text}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
