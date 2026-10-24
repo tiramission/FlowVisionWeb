@@ -189,9 +189,10 @@ export function Viewer() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // 拖拽平移
+  // 拖拽平移（仅左键；右键保留给手势）
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null)
   const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
     dragRef.current = { x: e.clientX, y: e.clientY, ox: viewRef.current.offset.x, oy: viewRef.current.offset.y }
   }
@@ -209,6 +210,7 @@ export function Viewer() {
   return (
     <div
       ref={containerRef}
+      data-viewer-root
       className="fixed inset-0 z-50 flex select-none flex-col bg-black/95 text-white cursor-grab active:cursor-grabbing"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

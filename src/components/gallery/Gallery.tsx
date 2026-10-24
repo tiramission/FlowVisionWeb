@@ -262,13 +262,13 @@ export function Gallery() {
     thumbCache.preload(files.slice(lo, hi + 1))
   }, [visibleRange?.first, visibleRange?.last, files])
 
-  // 右键手势（对标原版 RightMouseGesture）：按住右键拖动触发，带方向罗盘浮层反馈；
-  // 无拖动的右键由 mouseup 派发合成事件打开应用菜单。
-  // 拦截器挂在 document 捕获层（比 Radix 同节点监听更早），并用 zone.contains
-  // 圈定画廊区域——对滚动容器重挂载免疫，原生菜单在区域内始终被接管
+  // 右键手势（对标原版 RightMouseGesture）：浏览与大图查看器内均可用，
+  // 按住右键即浮出方向罗盘，拖过阈值触发动作；无拖动的右键在画廊内
+  // 由 mouseup 派发合成事件打开应用菜单（大图内无菜单）。
+  // 拦截挂在 window 捕获层（比 document/Radix 同节点监听更早，无时序漏洞），
+  // 用 zone 检查圈定范围，区域内的原生菜单始终接管
   const gestureRef = useRef({ active: false, x: 0, y: 0, fired: false })
   const bypassMenuRef = useRef(false)
-  const overlayRef = useRef<{ hide: () => void } | null>(null)
   useEffect(() => {
     const SHOW_DIST = 10
     const FIRE_DIST = 28
@@ -295,21 +295,20 @@ export function Gallery() {
       <div class="fv-g-ring flex size-14 items-center justify-center rounded-full border-2 border-border bg-background/90 shadow-lg backdrop-blur-sm text-muted-foreground">
         <svg class="fv-g-arrow" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 90ms"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
       </div>
-      <div class="fv-g-label rounded bg-foreground/85 px-2 py-0.5 text-xs text-background whitespace-nowrap" style="display:none"></div>`
+      <div class="fv-g-label rounded bg-foreground/85 px-2 py-0.5 text-xs text-background whitespace-nowrap"></div>`
     document.body.appendChild(ov)
     const ring = ov.querySelector('.fv-g-ring') as HTMLElement
     const arrow = ov.querySelector('.fv-g-arrow') as HTMLElement
     const labelEl = ov.querySelector('.fv-g-label') as HTMLElement
     let hideTimer = 0
-    const show = (x: number, y: number, sector: number, fired: boolean) => {
-      const s = SECTORS[sector]
+    const show = (x: number, y: number, sector: number | null, fired: boolean) => {
       ov.style.display = 'flex'
       ov.style.left = `${x}px`
       ov.style.top = `${y}px`
       ov.style.transform = 'translate(-50%, calc(-100% - 20px))'
-      arrow.style.transform = `rotate(${s.deg}deg)`
-      labelEl.style.display = s.label ? '' : 'none'
-      labelEl.textContent = s.label
+      const s = sector === null ? null : SECTORS[sector]
+      arrow.style.transform = `rotate(${s?.deg ?? 0}deg)`
+      labelEl.textContent = s ? s.label : '拖动选择方向'
       ring.classList.toggle('border-primary', fired)
       ring.classList.toggle('text-primary', fired)
       ring.classList.toggle('bg-primary/10', fired)
@@ -319,11 +318,13 @@ export function Gallery() {
       window.clearTimeout(hideTimer)
       hideTimer = window.setTimeout(hide, 500)
     }
-    overlayRef.current = { hide }
 
     const inZone = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Node)) return false
       const z = scrollRef.current
-      return !!z && target instanceof Node && z.contains(target)
+      if (z && z.contains(target)) return true
+      // 大图查看器内同样支持手势（原版行为）
+      return target instanceof Element && !!target.closest('[data-viewer-root]')
     }
 
     // 区域内原生右键菜单一律接管（合成派发时 bypass 放行给 Radix）
@@ -333,9 +334,10 @@ export function Gallery() {
       e.stopPropagation()
     }
     const onDown = (e: MouseEvent) => {
-      if (e.button !== 2 || !inZone(e.target) || useAppStore.getState().viewerId) return
+      if (e.button !== 2 || !inZone(e.target)) return
       e.preventDefault()
       gestureRef.current = { active: true, x: e.clientX, y: e.clientY, fired: false }
+      show(e.clientX, e.clientY, null, false)
     }
     const onMove = (e: MouseEvent) => {
       const g = gestureRef.current
@@ -363,8 +365,9 @@ export function Gallery() {
         return
       }
       hide()
-      // 无拖动的右键：在指针处合成 contextmenu 打开对应应用菜单
-      if (!inZone(e.target)) return
+      // 无拖动的右键：仅画廊内合成 contextmenu 打开应用菜单（大图内无菜单）
+      if (useAppStore.getState().viewerId) return
+      if (!(e.target instanceof Node) || !scrollRef.current?.contains(e.target)) return
       const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-file-id]')
       const target = (hit as HTMLElement | null) ?? scrollRef.current
       if (!target) return
@@ -377,13 +380,13 @@ export function Gallery() {
         bypassMenuRef.current = false
       }
     }
-    document.addEventListener('contextmenu', onCtx, true)
-    document.addEventListener('mousedown', onDown, true)
+    window.addEventListener('contextmenu', onCtx, true)
+    window.addEventListener('mousedown', onDown, true)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
-      document.removeEventListener('contextmenu', onCtx, true)
-      document.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('contextmenu', onCtx, true)
+      window.removeEventListener('mousedown', onDown, true)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       window.clearTimeout(hideTimer)

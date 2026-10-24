@@ -302,8 +302,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       for (let i = start + delta; i >= 0 && i < siblings.length; i += delta) {
         const candidate = siblings[i]
         if (await hasMedia(candidate.handle)) {
-          // silent：保持画廊挂载，手势确认浮层的淡出不被卸载截断
-          await get().navigateTo([...parentChain, candidate.handle], true)
+          // silent 仅在浏览态：保持画廊挂载让确认浮层淡出；大图打开时
+          // 非 silent 关闭查看器（对标原版手势切换文件夹关闭大图）
+          const silent = !get().viewerId
+          await get().navigateTo([...parentChain, candidate.handle], silent)
           return
         }
       }
