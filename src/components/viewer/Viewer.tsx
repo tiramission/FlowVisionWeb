@@ -162,6 +162,27 @@ export function Viewer() {
     return Math.min(el.clientWidth / natural.width, el.clientHeight / natural.height)
   }
 
+  /**
+   * 视图规范化（修复缩小到适应窗口时黑块/显示不完整）：
+   * 锚定缩放在缩小方向会累积偏移且从不归零——缩到 fit 尺度时图片带着
+   * 历史偏移偏离画布中心，内容出屏 + 黑底露出。
+   * - scale ≤ fit：offset 归零（恢复「适应窗口 = contain 居中」语义）
+   * - scale > fit：每轴限位在 ±|显示尺寸-画布尺寸|/2（图像边缘不脱离画布边缘，
+   *   拖拽/缩放都不能把图推飞）
+   */
+  const clampOffset = (targetScale: number, offset: { x: number; y: number }) => {
+    const el = canvasRef.current
+    if (!el || !natural) return offset
+    const fit = Math.min(el.clientWidth / natural.width, el.clientHeight / natural.height)
+    if (targetScale <= fit * 1.001) return { x: 0, y: 0 }
+    const mx = Math.abs(natural.width * targetScale - el.clientWidth) / 2
+    const my = Math.abs(natural.height * targetScale - el.clientHeight) / 2
+    return {
+      x: Math.min(mx, Math.max(-mx, offset.x)),
+      y: Math.min(my, Math.max(-my, offset.y)),
+    }
+  }
+
   const resetView = () => {
     setScale(fitScale())
     setOffset({ x: 0, y: 0 })
@@ -178,7 +199,7 @@ export function Viewer() {
     const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s * factor))
     const k = next / s
     setScale(next)
-    setOffset({ x: px - (px - o.x) * k, y: py - (py - o.y) * k })
+    setOffset(clampOffset(next, { x: px - (px - o.x) * k, y: py - (py - o.y) * k }))
   }
   const zoomAtRef = useRef(zoomAt)
   zoomAtRef.current = zoomAt
@@ -307,7 +328,7 @@ export function Viewer() {
   }
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current
-    if (d) setOffset({ x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y })
+    if (d) setOffset(clampOffset(viewRef.current.scale, { x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y }))
     const h = holdRef.current
     if (h.timer && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 8) clearHoldTimer()
   }
