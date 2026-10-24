@@ -670,7 +670,7 @@ function VideoControls(props: {
         {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
       </button>
       <Slider
-        className="w-20 shrink-0 [&_[data-slot=slider-range]]:bg-white [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-white"
+        className="w-20 shrink-0 [&_[data-slot=slider-range]]:bg-white [&_[data-slot=slider-track]]:bg-white/25 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-white [&_[data-slot=slider-thumb]]:ring-white/40"
         min={0}
         max={1}
         step={0.01}
