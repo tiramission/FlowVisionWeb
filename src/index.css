@@ -130,16 +130,12 @@
 }
 
 /* ---------- PWA 沉浸式标题栏（Window Controls Overlay） ---------- */
+/* .fv-wco 态的几何（高度/偏移/避让）由 Toolbar 内联 env() 驱动 */
 /* WCO 模式下应用内容延伸到窗口顶部，系统窗控按钮（最小化/关闭）叠加在
    右上角 env(titlebar-area-*) 区域内。顶栏右端避让该区域，拖拽区覆盖
    标题栏空白处以支持窗口拖动；仅安装态生效，浏览器回落 standalone 时
    这些 env 值为初始值，样式自动失效 */
-.fv-titlebar {
-  padding-top: env(titlebar-area-y, 0px);
-  padding-left: env(titlebar-area-x, 0px);
-  width: env(titlebar-area-width, 100%);
-  height: calc(env(titlebar-area-height, 48px) + 0px);
-}
+
 .fv-drag-region {
   -webkit-app-region: drag;
   app-region: drag;

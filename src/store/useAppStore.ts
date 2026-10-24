@@ -44,7 +44,7 @@ const DEFAULT_SETTINGS: Settings = {
   defaultLayout: 'waterfall',
   columnWidth: 220,
   restoreLastFolder: true,
-  gestureEnabled: true,
+  gestureEnabled: false,
   autoScroll: false,
   rememberVideoPos: true,
   autoPlayNext: false,
