@@ -21,7 +21,11 @@ function MainContent() {
       <div className="flex h-full flex-col items-center justify-center gap-3">
         <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
-          {scanProgress ? `正在扫描 ${scanProgress.done} / ${scanProgress.total}` : '正在读取目录…'}
+          {scanProgress
+            ? scanProgress.total > 0
+              ? `正在扫描 ${scanProgress.done} / ${scanProgress.total}`
+              : `已找到 ${scanProgress.done} 个文件…`
+            : '正在读取目录…'}
         </p>
       </div>
     )

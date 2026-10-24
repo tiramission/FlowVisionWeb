@@ -32,6 +32,8 @@ interface AppStore {
   files: FileModel[]
   layout: LayoutType
   columnWidth: number
+  /** 递归子目录模式：扫描当前目录下所有子目录（对标原版 Recursive mode） */
+  recursive: boolean
   sortType: SortType
   sortAsc: boolean
   selectedId: string | null
@@ -40,9 +42,13 @@ interface AppStore {
   openDirectory: () => Promise<void>
   /** 导航到目标目录链并扫描，push=true 时写入历史 */
   navigateTo: (chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
+  /** 按当前设置重新扫描当前目录（不写历史） */
+  rescan: () => void
   goUp: () => void
   goBack: () => void
   goForward: () => void
+  /** 切换递归模式并立即重扫 */
+  toggleRecursive: () => void
   /** 展开/折叠目录树节点，首次展开时懒加载子目录 */
   toggleDir: (key: string, chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
   toggleSidebar: () => void
@@ -87,8 +93,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     })
     try {
-      const models = await readDirectory(dir, (done, total) => {
-        if (scanGeneration === gen) set({ scanProgress: { done, total } })
+      const models = await readDirectory(dir, {
+        recursive: get().recursive,
+        onProgress: (done, total) => {
+          if (scanGeneration === gen) set({ scanProgress: { done, total } })
+        },
       })
       if (scanGeneration !== gen) return
       set({ files: models, status: 'ready', scanProgress: null })
@@ -120,6 +129,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     files: [],
     layout: 'waterfall',
     columnWidth: 220,
+    recursive: false,
     sortType: 'name',
     sortAsc: true,
     selectedId: null,
@@ -134,6 +144,11 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     navigateTo: async chain => { await browse(chain, true) },
+
+    rescan: () => {
+      const { dirChain } = get()
+      if (dirChain.length > 0) void browse(dirChain, false)
+    },
 
     goUp: () => {
       const { dirChain } = get()
@@ -177,6 +192,11 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
+
+    toggleRecursive: () => {
+      set(s => ({ recursive: !s.recursive }))
+      get().rescan()
+    },
 
     setLayout: layout => set({ layout }),
     setColumnWidth: w => set({ columnWidth: w }),

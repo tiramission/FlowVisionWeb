@@ -1,6 +1,6 @@
 import type { FileModel } from '@/types'
 import { readImageDimensions } from '@/lib/image/dimensions'
-import { FILE_EXTENSIONS, VIDEO_EXTENSIONS } from './constants'
+import { FILE_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from './constants'
 import { runPool } from './pool'
 
 declare global {
@@ -13,6 +13,9 @@ declare global {
 type IterableDirectoryHandle = FileSystemDirectoryHandle & {
   values(): AsyncIterableIterator<FileSystemHandle>
 }
+
+/** 递归模式最大深度（对标原版 folderSearchDepth 默认值 4） */
+export const RECURSIVE_DEPTH = 4
 
 export function isFsApiSupported(): boolean {
   return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function'
@@ -34,38 +37,99 @@ function extOf(name: string): string {
   return i === -1 ? '' : name.slice(i + 1).toLowerCase()
 }
 
-async function collectHandles(dir: FileSystemDirectoryHandle): Promise<FileSystemFileHandle[]> {
-  const out: FileSystemFileHandle[] = []
-  for await (const handle of (dir as IterableDirectoryHandle).values()) {
-    if (handle.kind === 'file' && FILE_EXTENSIONS.has(extOf(handle.name))) {
-      out.push(handle as FileSystemFileHandle)
-    }
+function makeFile(handle: FileSystemFileHandle, file: File, prefix: string): FileModel {
+  const ext = extOf(handle.name)
+  const relPath = prefix + handle.name
+  return {
+    id: relPath,
+    name: handle.name,
+    relPath,
+    ext,
+    type: VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image',
+    size: file.size,
+    lastModified: file.lastModified,
+    handle,
   }
-  return out
 }
 
-/** 枚举目录内受支持的文件并读取元信息（size/lastModified），getFile 不读文件内容，开销小 */
-export async function readDirectory(
-  dir: FileSystemDirectoryHandle,
-  onProgress: (done: number, total: number) => void,
-): Promise<FileModel[]> {
-  const handles = await collectHandles(dir)
-  const total = handles.length
-  onProgress(0, total)
-  const models = await runPool(handles, 64, async (handle): Promise<FileModel> => {
-    const file = await handle.getFile()
-    const ext = extOf(handle.name)
-    return {
-      id: handle.name,
-      name: handle.name,
-      ext,
-      type: VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image',
-      size: file.size,
-      lastModified: file.lastModified,
-      handle,
+function makeFolder(handle: FileSystemDirectoryHandle): FileModel {
+  return {
+    id: handle.name,
+    name: handle.name,
+    relPath: handle.name,
+    ext: '',
+    type: 'folder',
+    size: 0,
+    lastModified: 0,
+    handle: null,
+    dirHandle: handle,
+  }
+}
+
+export interface ScanOptions {
+  recursive: boolean
+  /** total=0 表示总量未知（递归模式），done 为已发现数 */
+  onProgress: (done: number, total: number) => void
+}
+
+/**
+ * 枚举目录内受支持的文件。非递归模式同时返回直接子文件夹条目（画廊中显示堆叠缩略图）；
+ * 递归模式广度优先下探到 RECURSIVE_DEPTH，文件带相对路径，不再包含文件夹条目
+ */
+export async function readDirectory(dir: FileSystemDirectoryHandle, opts: ScanOptions): Promise<FileModel[]> {
+  const files: FileModel[] = []
+  const folders: FileModel[] = []
+
+  if (!opts.recursive) {
+    const fileHandles: FileSystemFileHandle[] = []
+    for await (const handle of (dir as IterableDirectoryHandle).values()) {
+      if (handle.kind === 'file') {
+        if (FILE_EXTENSIONS.has(extOf(handle.name))) fileHandles.push(handle as FileSystemFileHandle)
+      } else {
+        folders.push(makeFolder(handle as FileSystemDirectoryHandle))
+      }
     }
-  }, done => onProgress(done, total))
-  return models.sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true, sensitivity: 'base' }))
+    const total = fileHandles.length
+    opts.onProgress(0, total)
+    await runPool(fileHandles, 64, async handle => {
+      files.push(makeFile(handle, await handle.getFile(), ''))
+    }, done => opts.onProgress(done, total))
+  } else {
+    let found = 0
+    const report = () => opts.onProgress(found, 0)
+    report()
+    const pending: { handle: FileSystemDirectoryHandle; depth: number; prefix: string }[] = [
+      { handle: dir, depth: 0, prefix: '' },
+    ]
+    while (pending.length > 0) {
+      const batch = pending.splice(0, pending.length)
+      await runPool(batch, 8, async ({ handle, depth, prefix }) => {
+        for await (const entry of (handle as IterableDirectoryHandle).values()) {
+          if (entry.kind === 'file') {
+            if (!FILE_EXTENSIONS.has(extOf(entry.name))) continue
+            files.push(makeFile(entry as FileSystemFileHandle, await (entry as FileSystemFileHandle).getFile(), prefix))
+            found++
+          } else if (depth + 1 < RECURSIVE_DEPTH) {
+            const sub = entry as FileSystemDirectoryHandle
+            pending.push({ handle: sub, depth: depth + 1, prefix: prefix + sub.name + '/' })
+          }
+        }
+        report()
+      })
+    }
+  }
+
+  return [...folders, ...files]
+}
+
+/** 取目录内第一个图片文件句柄（文件夹堆叠缩略图预览用） */
+export async function getFirstImageFile(dir: FileSystemDirectoryHandle): Promise<FileSystemFileHandle | null> {
+  for await (const handle of (dir as IterableDirectoryHandle).values()) {
+    if (handle.kind === 'file' && IMAGE_EXTENSIONS.has(extOf(handle.name))) {
+      return handle as FileSystemFileHandle
+    }
+  }
+  return null
 }
 
 /** 子目录项（目录树懒加载用） */
@@ -105,7 +169,7 @@ export async function fillImageSizes(
     }
   }
   await runPool(images, 8, async m => {
-    if (isCancelled()) return
+    if (isCancelled() || !m.handle) return
     try {
       const size = await readImageDimensions(await m.handle.getFile())
       if (size && size.width > 0 && size.height > 0) acc[m.id] = size

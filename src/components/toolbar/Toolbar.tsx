@@ -1,8 +1,9 @@
-import { ArrowUpDown, Columns3, FolderOpen, LayoutGrid, LoaderCircle, Moon, Sun } from 'lucide-react'
+import { ArrowUpDown, Columns3, FolderOpen, FolderTree, LayoutGrid, List, LoaderCircle, Moon, Rows3, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
+import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
@@ -13,6 +14,13 @@ const SORT_OPTIONS: { value: SortType; label: string }[] = [
   { value: 'name', label: '名称' },
   { value: 'size', label: '大小' },
   { value: 'date', label: '修改日期' },
+]
+
+const LAYOUT_OPTIONS: { value: LayoutType; label: string; icon: React.ReactNode }[] = [
+  { value: 'waterfall', label: '瀑布流', icon: <Columns3 /> },
+  { value: 'justified', label: '等高行', icon: <Rows3 /> },
+  { value: 'grid', label: '网格', icon: <LayoutGrid /> },
+  { value: 'detail', label: '列表', icon: <List /> },
 ]
 
 function ToolButton(props: React.ComponentProps<typeof Button> & { tip: string }) {
@@ -35,12 +43,14 @@ export function Toolbar() {
   const fileCount = useAppStore(s => s.files.length)
   const layout = useAppStore(s => s.layout)
   const columnWidth = useAppStore(s => s.columnWidth)
+  const recursive = useAppStore(s => s.recursive)
   const sortType = useAppStore(s => s.sortType)
   const sortAsc = useAppStore(s => s.sortAsc)
   const theme = useAppStore(s => s.theme)
   const openDirectory = useAppStore(s => s.openDirectory)
   const setLayout = useAppStore(s => s.setLayout)
   const setColumnWidth = useAppStore(s => s.setColumnWidth)
+  const toggleRecursive = useAppStore(s => s.toggleRecursive)
   const setSortType = useAppStore(s => s.setSortType)
   const toggleSortAsc = useAppStore(s => s.toggleSortAsc)
   const toggleTheme = useAppStore(s => s.toggleTheme)
@@ -89,23 +99,32 @@ export function Toolbar() {
           value={layout}
           onValueChange={v => { if (v) setLayout(v as LayoutType) }}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <ToggleGroupItem value="waterfall" aria-label="瀑布流布局">
-                <Columns3 />
-              </ToggleGroupItem>
-            </TooltipTrigger>
-            <TooltipContent>瀑布流</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <ToggleGroupItem value="grid" aria-label="网格布局">
-                <LayoutGrid />
-              </ToggleGroupItem>
-            </TooltipTrigger>
-            <TooltipContent>网格</TooltipContent>
-          </Tooltip>
+          {LAYOUT_OPTIONS.map(o => (
+            <Tooltip key={o.value}>
+              <TooltipTrigger asChild>
+                <ToggleGroupItem value={o.value} aria-label={`${o.label}布局`}>
+                  {o.icon}
+                </ToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent>{o.label}</TooltipContent>
+            </Tooltip>
+          ))}
         </ToggleGroup>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Toggle
+              variant="outline"
+              pressed={recursive}
+              onPressedChange={() => toggleRecursive()}
+              aria-label="递归子目录"
+              disabled={status === 'idle'}
+            >
+              <FolderTree />
+            </Toggle>
+          </TooltipTrigger>
+          <TooltipContent>递归子目录（含下级目录，最深 4 层）</TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
