@@ -263,15 +263,17 @@ export function Gallery() {
   }, [visibleRange?.first, visibleRange?.last, files])
 
   // 右键手势（对标原版 RightMouseGesture）：浏览与大图查看器内均可用，
-  // 按住右键即浮出方向罗盘，拖过阈值触发动作；无拖动的右键在画廊内
-  // 由 mouseup 派发合成事件打开应用菜单（大图内无菜单）。
+  // 按住右键即浮出方向罗盘，拖到外圈（56px，进度环可视化）才触发，
+  // 防止点击时手抖误触；Ctrl+Z 可撤销手势跳转。
+  // 无拖动的右键在画廊内由 mouseup 派发合成事件打开应用菜单（大图内无菜单）。
   // 拦截挂在 window 捕获层（比 document/Radix 同节点监听更早，无时序漏洞），
   // 用 zone 检查圈定范围，区域内的原生菜单始终接管
   const gestureRef = useRef({ active: false, x: 0, y: 0, fired: false })
   const bypassMenuRef = useRef(false)
   useEffect(() => {
     const SHOW_DIST = 10
-    const FIRE_DIST = 28
+    const FIRE_DIST = 56
+    const CIRC = 2 * Math.PI * 26 // 与下方进度环 SVG 的 r=26 一致
 
     // 8 扇区（屏幕坐标 y 向下）：索引 = round(atan2(dy,dx)/45°)
     const SECTORS: { deg: number; label: string; act: () => void }[] = [
@@ -292,23 +294,29 @@ export function Gallery() {
     ov.className = 'fixed z-[90] pointer-events-none flex flex-col items-center gap-1.5'
     ov.style.display = 'none'
     ov.innerHTML = `
-      <div class="fv-g-ring flex size-14 items-center justify-center rounded-full border-2 border-border bg-background/90 shadow-lg backdrop-blur-sm text-muted-foreground">
-        <svg class="fv-g-arrow" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 90ms"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+      <div class="fv-g-ring relative flex size-16 items-center justify-center rounded-full border-2 border-border bg-background/90 shadow-lg backdrop-blur-sm text-muted-foreground">
+        <svg class="absolute inset-0" viewBox="0 0 64 64">
+          <circle cx="32" cy="32" r="26" fill="none" stroke="#888" stroke-opacity="0.25" stroke-width="3"/>
+          <circle class="fv-g-bar" cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${CIRC.toFixed(1)}" transform="rotate(-90 32 32)"/>
+        </svg>
+        <svg class="fv-g-arrow relative" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 90ms"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
       </div>
       <div class="fv-g-label rounded bg-foreground/85 px-2 py-0.5 text-xs text-background whitespace-nowrap"></div>`
     document.body.appendChild(ov)
     const ring = ov.querySelector('.fv-g-ring') as HTMLElement
     const arrow = ov.querySelector('.fv-g-arrow') as HTMLElement
+    const bar = ov.querySelector('.fv-g-bar') as SVGCircleElement
     const labelEl = ov.querySelector('.fv-g-label') as HTMLElement
     let hideTimer = 0
-    const show = (x: number, y: number, sector: number | null, fired: boolean) => {
+    const show = (x: number, y: number, sector: number | null, fired: boolean, progress: number) => {
       ov.style.display = 'flex'
       ov.style.left = `${x}px`
       ov.style.top = `${y}px`
       ov.style.transform = 'translate(-50%, calc(-100% - 20px))'
       const s = sector === null ? null : SECTORS[sector]
       arrow.style.transform = `rotate(${s?.deg ?? 0}deg)`
-      labelEl.textContent = s ? s.label : '拖动选择方向'
+      bar.style.strokeDashoffset = `${(CIRC * (1 - progress)).toFixed(1)}`
+      labelEl.textContent = s ? (fired ? `${s.label}（Ctrl+Z 撤销）` : s.label) : '拖动到外圈触发'
       ring.classList.toggle('border-primary', fired)
       ring.classList.toggle('text-primary', fired)
       ring.classList.toggle('bg-primary/10', fired)
@@ -316,7 +324,7 @@ export function Gallery() {
     const hide = () => { ov.style.display = 'none' }
     const hideSoon = () => {
       window.clearTimeout(hideTimer)
-      hideTimer = window.setTimeout(hide, 500)
+      hideTimer = window.setTimeout(hide, 900)
     }
 
     const inZone = (target: EventTarget | null): boolean => {
@@ -337,7 +345,7 @@ export function Gallery() {
       if (e.button !== 2 || !inZone(e.target)) return
       e.preventDefault()
       gestureRef.current = { active: true, x: e.clientX, y: e.clientY, fired: false }
-      show(e.clientX, e.clientY, null, false)
+      show(e.clientX, e.clientY, null, false, 0)
     }
     const onMove = (e: MouseEvent) => {
       const g = gestureRef.current
@@ -345,14 +353,21 @@ export function Gallery() {
       const dx = e.clientX - g.x
       const dy = e.clientY - g.y
       const dist = Math.hypot(dx, dy)
-      if (g.fired || dist < SHOW_DIST) return
+      if (g.fired) return
       const sector = sectorOf(dx, dy)
       if (dist >= FIRE_DIST) {
         g.fired = true
-        SECTORS[sector].act()
-        show(g.x, g.y, sector, true)
-      } else {
-        show(g.x, g.y, sector, false)
+        const s = SECTORS[sector]
+        if (s.label) {
+          useAppStore.getState().pushGestureUndo({
+            chain: [...useAppStore.getState().dirChain],
+            label: s.label,
+          })
+        }
+        s.act()
+        show(g.x, g.y, sector, true, 1)
+      } else if (dist >= SHOW_DIST) {
+        show(g.x, g.y, sector, false, (dist - SHOW_DIST) / (FIRE_DIST - SHOW_DIST))
       }
     }
     const onUp = (e: MouseEvent) => {

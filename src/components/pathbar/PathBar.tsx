@@ -66,6 +66,14 @@ export function PathBar() {
       if (s.viewerId || !s.dirChain.length) return
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      // 撤销手势跳转（菜单打开时也允许）
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (s.gestureUndoStack.length) {
+          e.preventDefault()
+          s.undoLastGesture()
+        }
+        return
+      }
       if (document.querySelector('[role="menu"], [role="dialog"], [role="listbox"], [role="alertdialog"]')) return
       if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); s.goBack(); return }
       if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); s.goForward(); return }

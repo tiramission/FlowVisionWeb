@@ -78,6 +78,12 @@ export interface Toast {
   kind: 'info' | 'error'
 }
 
+/** 手势跳转撤销条目：触发前的目录链 + 动作名 */
+export interface GestureUndoEntry {
+  chain: FileSystemDirectoryHandle[]
+  label: string
+}
+
 const initialSettings = loadSettings()
 
 interface AppStore {
@@ -120,6 +126,10 @@ interface AppStore {
   /** 收藏夹（对标原版 myFavoritesArray），IDB 持久化 */
   favorites: FavItem[]
   favoritesLoaded: boolean
+  /** 右键手势跳转撤销栈（Ctrl+Z 逐级回退），最多 30 条 */
+  gestureUndoStack: GestureUndoEntry[]
+  pushGestureUndo: (entry: GestureUndoEntry) => void
+  undoLastGesture: () => void
   openDirectory: () => Promise<void>
   /** 导航到目标目录链并扫描，push=true 时写入历史；silent 平滑刷新不闪列表 */
   navigateTo: (chain: readonly FileSystemDirectoryHandle[], silent?: boolean) => Promise<void>
@@ -251,6 +261,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     toast: null,
     favorites: [],
     favoritesLoaded: false,
+    gestureUndoStack: [],
 
     openDirectory: async () => {
       const dir = await pickDirectory()
@@ -348,6 +359,22 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     loadFavorites: async () => {
       set({ favorites: await listFavorites(), favoritesLoaded: true })
+    },
+
+    pushGestureUndo: entry => set(s => ({
+      gestureUndoStack: [...s.gestureUndoStack.slice(-29), entry],
+    })),
+
+    undoLastGesture: () => {
+      const stack = get().gestureUndoStack
+      const entry = stack[stack.length - 1]
+      if (!entry) {
+        get().showToast('没有可撤销的手势')
+        return
+      }
+      set({ gestureUndoStack: stack.slice(0, -1) })
+      void get().navigateTo(entry.chain, true)
+        .then(() => get().showToast(`已撤销：${entry.label}`))
     },
 
     toggleFavoriteCurrent: async () => {
