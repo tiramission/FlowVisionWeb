@@ -34,9 +34,17 @@ export function FolderTile({ file, selected, onSelect, onOpen, width, height, cl
       style={{ width: width ?? '100%', height: height ?? '100%', ...style }}
       {...rest}
     >
-      <div className="absolute inset-0 rounded-md border bg-muted shadow-sm" style={{ transform: 'translate(-5%, -6%) rotate(-4deg)' }} />
-      <div className="absolute inset-0 rounded-md border bg-muted shadow-sm" style={{ transform: 'translate(5%, -3%) rotate(3deg)' }} />
-      <div className="absolute inset-0 overflow-hidden rounded-md border bg-muted">
+      {/* 堆叠卡片：全部收在瓦片边界内，顶部露出边缘；微旋转角度已按
+          边距校算过，任何尺寸下不会溢出盖住选中圈或相邻瓦片 */}
+      <div
+        className="absolute top-1 bottom-4 left-3 right-3 rounded-md border bg-muted shadow-sm"
+        style={{ transform: 'rotate(-1.5deg)' }}
+      />
+      <div
+        className="absolute top-2 bottom-2 left-1.5 right-1.5 rounded-md border bg-muted shadow-sm"
+        style={{ transform: 'rotate(1deg)' }}
+      />
+      <div className="absolute top-4 bottom-0 left-0 right-0 overflow-hidden rounded-md border bg-muted">
         {url ? (
           <img src={url} alt={file.name} draggable={false} decoding="async" className="h-full w-full object-cover" />
         ) : (
