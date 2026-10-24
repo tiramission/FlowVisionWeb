@@ -10,6 +10,21 @@ const MIN_SCALE = 0.05
 const MAX_SCALE = 32
 const WHEEL_FACTOR = 0.0015
 
+/**
+ * 尺寸已知时用显式像素尺寸渲染，交给外层 transform 缩放。
+ * 不能依赖自然尺寸布局：Tailwind preflight 的 img { max-width: 100% } 会与
+ * 绝对定位 shrink-to-fit 容器 + transform 循环求解，把布局尺寸错误压缩，
+ * 导致"适应窗口"显示尺寸不对（过大被裁或过小）
+ */
+function explicitSize(natural: { width: number; height: number }): React.CSSProperties {
+  return {
+    width: natural.width,
+    height: natural.height,
+    maxWidth: 'none',
+    maxHeight: 'none',
+  }
+}
+
 export function Viewer() {
   const viewerId = useAppStore(s => s.viewerId)
   const closeViewer = useAppStore(s => s.closeViewer)
@@ -21,6 +36,8 @@ export function Viewer() {
   const url = useFileUrl(file?.handle)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  // 画布区域（不含顶栏/底栏），fit 与缩放锚点都基于它，避免图片被栏遮挡
+  const canvasRef = useRef<HTMLDivElement>(null)
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(
     file?.width && file?.height ? { width: file.width, height: file.height } : null,
   )
@@ -31,7 +48,7 @@ export function Viewer() {
   viewRef.current = { scale, offset }
 
   const fitScale = () => {
-    const el = containerRef.current
+    const el = canvasRef.current
     if (!el || !natural) return 1
     return Math.min(el.clientWidth / natural.width, el.clientHeight / natural.height)
   }
@@ -42,7 +59,7 @@ export function Viewer() {
   }
 
   const zoomAt = (clientX: number, clientY: number, factor: number) => {
-    const el = containerRef.current
+    const el = canvasRef.current
     if (!el || !natural) return
     const rect = el.getBoundingClientRect()
     // 以光标为锚点缩放：保持光标处的图像坐标不动
@@ -58,9 +75,10 @@ export function Viewer() {
   zoomAtRef.current = zoomAt
 
   const zoomCenter = (factor: number) => {
-    const el = containerRef.current
+    const el = canvasRef.current
     if (!el) return
-    zoomAtRef.current(el.clientWidth / 2, el.clientHeight / 2, factor)
+    const rect = el.getBoundingClientRect()
+    zoomAtRef.current(rect.left + rect.width / 2, rect.top + rect.height / 2, factor)
   }
 
   const nav = (delta: number) => {
@@ -74,6 +92,13 @@ export function Viewer() {
   }, [file?.id])
   // 尺寸就绪后适配窗口
   useLayoutEffect(() => { resetView() }, [file?.id, natural])
+
+  // 窗口尺寸变化时重新适应窗口
+  useEffect(() => {
+    const onResize = () => resetView()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  })
 
   // 滚轮缩放需要非 passive 监听才能 preventDefault
   useEffect(() => {
@@ -188,7 +213,7 @@ export function Viewer() {
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div ref={canvasRef} className="relative min-h-0 flex-1">
         <div
           className="absolute left-1/2 top-1/2 will-change-transform"
           style={{ transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
@@ -199,7 +224,8 @@ export function Viewer() {
                 src={url}
                 controls
                 autoPlay
-                className="max-h-[80dvh] max-w-[90vw] outline-none"
+                className={natural ? 'outline-none' : 'max-h-[80dvh] max-w-[90vw] outline-none'}
+                style={natural ? explicitSize(natural) : undefined}
                 onLoadedMetadata={e => {
                   const el = e.currentTarget
                   if (el.videoWidth > 0) setNatural(n => n ?? { width: el.videoWidth, height: el.videoHeight })
@@ -213,6 +239,7 @@ export function Viewer() {
                 draggable={false}
                 decoding="async"
                 className={natural ? '' : 'max-h-[80dvh] max-w-[90vw] object-contain'}
+                style={natural ? explicitSize(natural) : undefined}
                 onLoad={e => {
                   const img = e.currentTarget
                   if (img.naturalWidth <= 0) return
