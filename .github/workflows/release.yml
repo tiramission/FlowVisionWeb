@@ -38,3 +38,46 @@ jobs:
           name: FlowVision Web ${{ github.ref_name }}
           body: ''
           files: flowvision-web-${{ github.ref_name }}.zip
+
+  # Pages 部署与 Release 同一 tag 触发（workflow_call 链式会被
+  # GITHUB_TOKEN 事件不级联的规则拦住，直接 job 依赖最可靠）
+  deploy-pages:
+    name: Deploy Pages
+    needs: release
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Install
+        run: npm ci
+
+      - name: Build（子路径 base）
+        run: npm run build
+        env:
+          DEPLOY_BASE: /FlowVisionWeb/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

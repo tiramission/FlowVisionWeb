@@ -1,9 +1,8 @@
 name: Deploy Pages
 
-# 发布 Release 或手动触发时部署到 GitHub Pages
+# 手动部署入口；正式发布由 release.yml 的 deploy-pages job 完成
+# （GITHUB_TOKEN 创建的 Release 不再派发 release 事件，链式触发会失效）
 on:
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
