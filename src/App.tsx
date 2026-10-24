@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { ActionDialogs } from '@/components/dialogs/ActionDialogs'
 import { EmptyState } from '@/components/gallery/EmptyState'
 import { Gallery } from '@/components/gallery/Gallery'
 import { PathBar } from '@/components/pathbar/PathBar'
@@ -82,6 +83,7 @@ function App() {
           )}
         </div>
         {viewerId && <Viewer />}
+        <ActionDialogs />
       </div>
     </TooltipProvider>
   )

@@ -1,8 +1,27 @@
 import { create } from 'zustand'
 import { dirKey, fillImageSizes, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
+import { copyEntry, createDirectory, deleteEntry, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
 import type { FileModel, LayoutType, SortType, ThemeMode } from '@/types'
 
 type Status = 'idle' | 'scanning' | 'ready'
+
+export interface ClipEntry {
+  name: string
+  handle: FileSystemFileHandle | FileSystemDirectoryHandle
+}
+
+export interface Clipboard {
+  mode: 'copy' | 'cut'
+  /** 源父目录（剪切移动回退删除用）与源目录键（变淡显示与同目录判断用） */
+  sourceDir: FileSystemDirectoryHandle
+  sourceDirKey: string
+  entries: ClipEntry[]
+}
+
+export interface Toast {
+  text: string
+  kind: 'info' | 'error'
+}
 
 const THEME_KEY = 'fv-theme'
 
@@ -45,11 +64,16 @@ interface AppStore {
   selectedId: string | null
   viewerId: string | null
   theme: ThemeMode
+  /** 文件管理：剪贴板 / 对话框目标 / 轻提示（对标原版 isCutMode、cutItemPaths、operationLogs） */
+  clipboard: Clipboard | null
+  renameTarget: FileModel | null
+  deleteTarget: FileModel | null
+  toast: Toast | null
   openDirectory: () => Promise<void>
   /** 导航到目标目录链并扫描，push=true 时写入历史 */
   navigateTo: (chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
-  /** 按当前设置重新扫描当前目录（不写历史） */
-  rescan: () => void
+  /** 按当前设置重新扫描当前目录（不写历史）；silent 不清列表避免闪烁（文件操作后刷新） */
+  rescan: (silent?: boolean) => void
   goUp: () => void
   goBack: () => void
   goForward: () => void
@@ -58,6 +82,15 @@ interface AppStore {
   setSearchQuery: (q: string) => void
   setSearchRegex: (b: boolean) => void
   setPinyinReady: () => void
+  copyEntries: (entries: ClipEntry[]) => void
+  cutEntries: (entries: ClipEntry[]) => void
+  pasteIntoCurrent: () => Promise<void>
+  renameInCurrent: (file: FileModel, newName: string) => Promise<void>
+  deleteInCurrent: (file: FileModel) => Promise<void>
+  createFolderInCurrent: () => Promise<void>
+  setRenameTarget: (f: FileModel | null) => void
+  setDeleteTarget: (f: FileModel | null) => void
+  showToast: (text: string, kind?: Toast['kind']) => void
   /** 展开/折叠目录树节点，首次展开时懒加载子目录 */
   toggleDir: (key: string, chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
   toggleSidebar: () => void
@@ -75,23 +108,25 @@ interface AppStore {
 
 /** 目录扫描代数：导航/切换根目录时递增，旧扫描的回调据此失效 */
 let scanGeneration = 0
+/** toast 自动消失计时器 */
+let toastTimer: number | null = null
 
 export const useAppStore = create<AppStore>((set, get) => {
-  /** 扫描 chain 末端目录的文件并进入浏览状态 */
-  const browse = async (chain: readonly FileSystemDirectoryHandle[], push: boolean) => {
+  /** 扫描 chain 末端目录的文件并进入浏览状态；silent 保留现有列表（文件操作后平滑刷新） */
+  const browse = async (chain: readonly FileSystemDirectoryHandle[], push: boolean, silent = false) => {
     const gen = ++scanGeneration
     const dir = chain[chain.length - 1]
     set(s => {
       const truncated = push ? s.historyChains.slice(0, s.historyIndex + 1) : s.historyChains
       const historyChains = push ? [...truncated, [...chain]] : s.historyChains
       return {
-        status: 'scanning',
-        files: [],
+        status: silent ? s.status : 'scanning',
+        files: silent ? s.files : [],
         scanProgress: null,
         rootHandle: chain[0],
         dirChain: [...chain],
-        selectedId: null,
-        viewerId: null,
+        selectedId: silent ? s.selectedId : null,
+        viewerId: s.viewerId,
         // 自动展开祖先节点，让当前目录在树上可见（对标原版 dirTreeAutoExpand）
         expandedKeys: Array.from(new Set([
           ...s.expandedKeys,
@@ -148,19 +183,23 @@ export const useAppStore = create<AppStore>((set, get) => {
     selectedId: null,
     viewerId: null,
     theme: initTheme(),
+    clipboard: null,
+    renameTarget: null,
+    deleteTarget: null,
+    toast: null,
 
     openDirectory: async () => {
       const dir = await pickDirectory()
       if (!dir) return
-      set({ treeChildren: {}, expandedKeys: [], historyChains: [], historyIndex: -1, sidebarOpen: true })
+      set({ treeChildren: {}, expandedKeys: [], historyChains: [], historyIndex: -1, sidebarOpen: true, clipboard: null })
       await browse([dir], true)
     },
 
     navigateTo: async chain => { await browse(chain, true) },
 
-    rescan: () => {
+    rescan: (silent = false) => {
       const { dirChain } = get()
-      if (dirChain.length > 0) void browse(dirChain, false)
+      if (dirChain.length > 0) void browse(dirChain, false, silent)
     },
 
     goUp: () => {
@@ -209,6 +248,156 @@ export const useAppStore = create<AppStore>((set, get) => {
     setSearchQuery: q => set({ searchQuery: q }),
     setSearchRegex: b => set({ searchRegex: b }),
     setPinyinReady: () => set({ pinyinReady: true }),
+
+    showToast: (text, kind = 'info') => {
+      if (toastTimer !== null) window.clearTimeout(toastTimer)
+      set({ toast: { text, kind } })
+      toastTimer = window.setTimeout(() => {
+        set(s => (s.toast?.text === text && s.toast.kind === kind ? { toast: null } : {}))
+        toastTimer = null
+      }, 2600)
+    },
+    setRenameTarget: f => set({ renameTarget: f }),
+    setDeleteTarget: f => set({ deleteTarget: f }),
+
+    copyEntries: entries => {
+      const { dirChain } = get()
+      if (!entries.length || !dirChain.length) return
+      set({
+        clipboard: {
+          mode: 'copy',
+          sourceDir: dirChain[dirChain.length - 1],
+          sourceDirKey: dirKey(dirChain),
+          entries,
+        },
+      })
+      get().showToast(`已复制 ${entries.length} 项`)
+    },
+
+    cutEntries: entries => {
+      const { dirChain } = get()
+      if (!entries.length || !dirChain.length) return
+      set({
+        clipboard: {
+          mode: 'cut',
+          sourceDir: dirChain[dirChain.length - 1],
+          sourceDirKey: dirKey(dirChain),
+          entries,
+        },
+      })
+      get().showToast(`已剪切 ${entries.length} 项`)
+    },
+
+    pasteIntoCurrent: async () => {
+      const s = get()
+      const clip = s.clipboard
+      const cur = s.dirChain[s.dirChain.length - 1]
+      if (!clip || !cur) return
+      if (clip.mode === 'cut' && clip.sourceDirKey === dirKey(s.dirChain)) {
+        set({ clipboard: null })
+        s.showToast('源目录与目标相同，已清空剪贴板')
+        return
+      }
+      if (!(await ensureWritePermission(cur))) {
+        s.showToast('未获得写入权限，粘贴取消', 'error')
+        return
+      }
+      try {
+        for (const entry of clip.entries) {
+          if (clip.mode === 'copy') await copyEntry(entry.handle, cur)
+          else await moveEntry(entry.handle, clip.sourceDir, cur)
+        }
+        if (clip.mode === 'cut') set({ clipboard: null })
+        set(st => {
+          const treeChildren = { ...st.treeChildren }
+          delete treeChildren[dirKey(st.dirChain)]
+          return { treeChildren }
+        })
+        get().rescan(true)
+        get().showToast(`已粘贴 ${clip.entries.length} 项`)
+      } catch (err) {
+        console.error('粘贴失败:', err)
+        get().showToast('粘贴失败，详见控制台', 'error')
+      }
+    },
+
+    renameInCurrent: async (file, newName) => {
+      const s = get()
+      const cur = s.dirChain[s.dirChain.length - 1]
+      if (!cur) return
+      const handle = file.handle ?? file.dirHandle
+      if (!handle) return
+      try {
+        const parent = await resolveParentDir(cur, file.relPath)
+        if (!(await ensureWritePermission(parent))) {
+          s.showToast('未获得写入权限，重命名取消', 'error')
+          return
+        }
+        await renameEntry(handle, newName)
+        set(st => {
+          const treeChildren = { ...st.treeChildren }
+          delete treeChildren[dirKey(st.dirChain)]
+          return { treeChildren, clipboard: null }
+        })
+        get().rescan(true)
+        get().showToast(`已重命名为 ${newName}`)
+      } catch (err) {
+        console.error('重命名失败:', err)
+        get().showToast('重命名失败（浏览器可能不支持）', 'error')
+      }
+    },
+
+    deleteInCurrent: async file => {
+      const s = get()
+      const cur = s.dirChain[s.dirChain.length - 1]
+      if (!cur) return
+      try {
+        const parent = await resolveParentDir(cur, file.relPath)
+        if (!(await ensureWritePermission(parent))) {
+          s.showToast('未获得写入权限，删除取消', 'error')
+          return
+        }
+        await deleteEntry(parent, file.name)
+        set(st => {
+          const treeChildren = { ...st.treeChildren }
+          delete treeChildren[dirKey(st.dirChain)]
+          return {
+            treeChildren,
+            clipboard: null,
+            viewerId: st.viewerId === file.id ? null : st.viewerId,
+            selectedId: st.selectedId === file.id ? null : st.selectedId,
+          }
+        })
+        get().rescan(true)
+        get().showToast(`已删除 ${file.name}`)
+      } catch (err) {
+        console.error('删除失败:', err)
+        get().showToast('删除失败，详见控制台', 'error')
+      }
+    },
+
+    createFolderInCurrent: async () => {
+      const s = get()
+      const cur = s.dirChain[s.dirChain.length - 1]
+      if (!cur) return
+      try {
+        if (!(await ensureWritePermission(cur))) {
+          s.showToast('未获得写入权限，新建取消', 'error')
+          return
+        }
+        const name = await createDirectory(cur)
+        set(st => {
+          const treeChildren = { ...st.treeChildren }
+          delete treeChildren[dirKey(st.dirChain)]
+          return { treeChildren }
+        })
+        get().rescan(true)
+        get().showToast(`已创建文件夹 ${name}`)
+      } catch (err) {
+        console.error('新建文件夹失败:', err)
+        get().showToast('新建文件夹失败', 'error')
+      }
+    },
 
     toggleSortAsc: () => set(s => ({
       sortAsc: !s.sortAsc,

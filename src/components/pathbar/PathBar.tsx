@@ -1,21 +1,24 @@
 import { Fragment, useEffect } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUp, ChevronRight, PanelLeft } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUp, ChevronRight, ClipboardPaste, FolderPlus, PanelLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/utils'
 
-/** 路径栏：侧边栏开关、前进/后退/上级、面包屑（对标原版 CustomPathControl） */
+/** 路径栏：侧边栏开关、前进/后退/上级、新建文件夹/粘贴、面包屑（对标原版 CustomPathControl） */
 export function PathBar() {
   const dirChain = useAppStore(s => s.dirChain)
   const historyChains = useAppStore(s => s.historyChains)
   const historyIndex = useAppStore(s => s.historyIndex)
   const sidebarOpen = useAppStore(s => s.sidebarOpen)
+  const clipboard = useAppStore(s => s.clipboard)
   const navigateTo = useAppStore(s => s.navigateTo)
   const goUp = useAppStore(s => s.goUp)
   const goBack = useAppStore(s => s.goBack)
   const goForward = useAppStore(s => s.goForward)
   const toggleSidebar = useAppStore(s => s.toggleSidebar)
+  const createFolderInCurrent = useAppStore(s => s.createFolderInCurrent)
+  const pasteIntoCurrent = useAppStore(s => s.pasteIntoCurrent)
 
   // 键盘导航：Alt+←/→ 前进后退，Backspace/W 上级，S/Esc 返回（对标原版 W/S 手势），大图打开时不响应
   useEffect(() => {
@@ -78,6 +81,33 @@ export function PathBar() {
           </Button>
         </TooltipTrigger>
         <TooltipContent>上级目录（W / Backspace）</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!clipboard}
+            onClick={() => void pasteIntoCurrent()}
+            aria-label="粘贴"
+          >
+            <ClipboardPaste />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {clipboard
+            ? `粘贴（${clipboard.mode === 'cut' ? '剪切' : '复制'} ${clipboard.entries.length} 项）`
+            : '粘贴（剪贴板为空）'}
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" onClick={() => void createFolderInCurrent()} aria-label="新建文件夹">
+            <FolderPlus />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>新建文件夹</TooltipContent>
       </Tooltip>
 
       <nav

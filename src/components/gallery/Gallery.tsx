@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Film, Folder } from 'lucide-react'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { useFileUrl } from '@/hooks/useFileUrl'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
 import { useThumbUrl } from '@/hooks/useThumbUrl'
+import { dirKey } from '@/lib/fs/directory'
 import { formatBytes, formatDate } from '@/lib/format'
 import { computeJustifiedRows } from '@/lib/layout/justified'
 import { DIRECT_EXTS, PRELOAD_NEXT, PRELOAD_PRE, thumbCache } from '@/lib/thumb/cache'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStore, type ClipEntry } from '@/store/useAppStore'
 import { aspectOf, type FileModel } from '@/types'
 import { cn } from '@/lib/utils'
 import { FolderTile } from './FolderTile'
@@ -17,10 +19,58 @@ const PAD = 10
 const GAP = 8
 const DETAIL_ROW_H = 52
 
+function clipEntryOf(file: FileModel): ClipEntry | null {
+  const handle = file.handle ?? file.dirHandle
+  return handle ? { name: file.name, handle } : null
+}
+
+/** 条目右键菜单（打开/复制/剪切/重命名/删除），asChild 不引入额外 DOM 节点 */
+function ItemMenu({ file, onOpen, dimmed, children }: {
+  file: FileModel
+  onOpen: () => void
+  dimmed: boolean
+  children: React.ReactElement
+}) {
+  const copyEntries = useAppStore(s => s.copyEntries)
+  const cutEntries = useAppStore(s => s.cutEntries)
+  const setRenameTarget = useAppStore(s => s.setRenameTarget)
+  const setDeleteTarget = useAppStore(s => s.setDeleteTarget)
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        {dimmed ? <div className="opacity-50">{children}</div> : children}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onOpen}>
+          {file.type === 'folder' ? '打开' : '查看大图'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onClick={() => { const e = clipEntryOf(file); if (e) copyEntries([e]) }}
+        >
+          复制
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => { const e = clipEntryOf(file); if (e) cutEntries([e]) }}
+        >
+          剪切
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => setRenameTarget(file)}>重命名…</ContextMenuItem>
+        <ContextMenuItem className="text-destructive" onClick={() => setDeleteTarget(file)}>
+          删除…
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
 /** detail 布局单行（模块级组件，保证虚拟滚动行不被重挂载） */
-function DetailRow({ file, selected, onSelect, onOpen }: {
+function DetailRow({ file, selected, dimmed, onSelect, onOpen }: {
   file: FileModel
   selected: boolean
+  dimmed: boolean
   onSelect: () => void
   onOpen: () => void
 }) {
@@ -36,6 +86,7 @@ function DetailRow({ file, selected, onSelect, onOpen }: {
       className={cn(
         'flex cursor-pointer items-center gap-3 rounded-md px-4',
         selected ? 'bg-accent' : 'hover:bg-accent/50',
+        dimmed && 'opacity-50',
       )}
       style={{ height: DETAIL_ROW_H }}
     >
@@ -75,9 +126,23 @@ export function Gallery() {
   const dirChain = useAppStore(s => s.dirChain)
   const totalFiles = useAppStore(s => s.files.length)
   const searchQuery = useAppStore(s => s.searchQuery)
+  const clipboard = useAppStore(s => s.clipboard)
   const select = useAppStore(s => s.select)
   const openViewer = useAppStore(s => s.openViewer)
   const navigateTo = useAppStore(s => s.navigateTo)
+  const pasteIntoCurrent = useAppStore(s => s.pasteIntoCurrent)
+  const createFolderInCurrent = useAppStore(s => s.createFolderInCurrent)
+  const setRenameTarget = useAppStore(s => s.setRenameTarget)
+  const setDeleteTarget = useAppStore(s => s.setDeleteTarget)
+  const copyEntries = useAppStore(s => s.copyEntries)
+  const cutEntries = useAppStore(s => s.cutEntries)
+
+  // 剪切中的条目变淡（对标原版 cutItemPaths 变淡效果）
+  const cutNames = useMemo(() => {
+    if (clipboard?.mode !== 'cut' || !dirChain.length) return null
+    if (clipboard.sourceDirKey !== dirKey(dirChain)) return null
+    return new Set(clipboard.entries.map(e => e.name))
+  }, [clipboard, dirChain])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -95,14 +160,14 @@ export function Gallery() {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [dirChain])
 
+  // 网格：按目标列宽取整；瀑布流：四舍五入；justified/detail 同瀑布流（键盘导航用）
   const cols = width > 0
     ? (layout === 'grid'
         ? Math.floor((width - 2 * PAD + GAP) / (columnWidth + GAP))
-        : layout === 'detail' ? 1 : Math.round(width / columnWidth))
+        : Math.round(width / columnWidth))
     : 1
   const colW = width > 0 ? (width - 2 * PAD - GAP * (cols - 1)) / cols : columnWidth
 
-  // justified 行划分（memo：宽高比变化/列宽变化时重算）。传宽高比 w/h（宽度贡献）
   const justRows = useMemo(() => {
     if (layout !== 'justified' || width <= 0) return []
     return computeJustifiedRows(files.map(f => 1 / aspectOf(f)), width - 2 * PAD, columnWidth, GAP)
@@ -143,8 +208,7 @@ export function Gallery() {
   useEffect(() => { justVirtualizer.measure() }, [justRows, justVirtualizer])
   useEffect(() => { detailVirtualizer.measure() }, [layout, detailVirtualizer])
 
-  // 滚动方向预加载窗口（对标原版 PRELOAD_THUMB_RANGE_PRE/NEXT）：
-  // 把可视范围前后一定数量的图片低优先级送入缩略图缓存，滚到时直接命中内存
+  // 滚动方向预加载窗口（对标原版 PRELOAD_THUMB_RANGE_PRE/NEXT）
   const visibleRange = (() => {
     if (layout === 'grid') {
       const items = rowVirtualizer.getVirtualItems()
@@ -197,12 +261,43 @@ export function Gallery() {
     select(files[next].id)
   }, [files, selectedId, select])
 
-  // 键盘：方向键移动选中（按布局感知列数），Enter 打开（文件夹则进入）
+  // 键盘：方向键移动选中（感知布局列数）、Enter 打开、文件管理快捷键
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (useAppStore.getState().viewerId) return
+      const target = e.target as HTMLElement | null
+      const inField = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      const selected = selectedId ? files.find(f => f.id === selectedId) : undefined
+
+      if ((e.ctrlKey || e.metaKey) && !inField) {
+        if (e.key.toLowerCase() === 'c' && selected) {
+          const entry = clipEntryOf(selected)
+          if (entry) { e.preventDefault(); copyEntries([entry]) }
+          return
+        }
+        if (e.key.toLowerCase() === 'x' && selected) {
+          const entry = clipEntryOf(selected)
+          if (entry) { e.preventDefault(); cutEntries([entry]) }
+          return
+        }
+        if (e.key.toLowerCase() === 'v') {
+          e.preventDefault()
+          void pasteIntoCurrent()
+          return
+        }
+      }
+      if (inField) return
+      if (e.key === 'F2' && selected) {
+        e.preventDefault()
+        setRenameTarget(selected)
+        return
+      }
+      if (e.key === 'Delete' && selected) {
+        e.preventDefault()
+        setDeleteTarget(selected)
+        return
+      }
       if (e.key === 'Enter') {
-        const selected = files.find(f => f.id === selectedId)
         if (selected) openItem(selected)
         return
       }
@@ -220,7 +315,7 @@ export function Gallery() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [cols, moveSelection, selectedId, files, openItem])
+  }, [cols, moveSelection, selectedId, files, openItem, copyEntries, cutEntries, pasteIntoCurrent, setRenameTarget, setDeleteTarget])
 
   if (!files.length) {
     return (
@@ -232,12 +327,17 @@ export function Gallery() {
     )
   }
 
-  const gridCell = (f: FileModel) => (
+  const withMenu = (f: FileModel, node: React.ReactElement) => (
+    <ItemMenu key={f.id} file={f} dimmed={!!cutNames?.has(f.name)} onOpen={() => openItem(f)}>
+      {node}
+    </ItemMenu>
+  )
+
+  const tile = (f: FileModel, size?: { width?: number; height?: number }) => (
     <TileOrThumb
-      key={f.id}
       file={f}
-      width={columnWidth}
-      height={columnWidth}
+      width={size?.width}
+      height={size?.height}
       selected={f.id === selectedId}
       onSelect={() => select(f.id)}
       onOpen={() => openItem(f)}
@@ -245,112 +345,116 @@ export function Gallery() {
   )
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto overscroll-contain">
-      {layout === 'grid' && (
-        <div className="relative" style={{ height: rowVirtualizer.getTotalSize() + PAD * 2 }}>
-          {rowVirtualizer.getVirtualItems().map(vr => {
-            const start = vr.index * cols
-            return (
-              <div
-                key={vr.key}
-                className="absolute top-0 flex"
-                style={{ left: PAD, right: PAD, gap: GAP, transform: `translateY(${vr.start + PAD}px)` }}
-              >
-                {files.slice(start, start + cols).map(gridCell)}
-              </div>
-            )
-          })}
-        </div>
-      )}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div ref={scrollRef} className="h-full overflow-y-auto overscroll-contain">
+          {layout === 'grid' && (
+            <div className="relative" style={{ height: rowVirtualizer.getTotalSize() + PAD * 2 }}>
+              {rowVirtualizer.getVirtualItems().map(vr => {
+                const start = vr.index * cols
+                return (
+                  <div
+                    key={vr.key}
+                    className="absolute top-0 flex"
+                    style={{ left: PAD, right: PAD, gap: GAP, transform: `translateY(${vr.start + PAD}px)` }}
+                  >
+                    {files.slice(start, start + cols).map(f => withMenu(f, tile(f, { width: columnWidth, height: columnWidth })))}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
-      {layout === 'waterfall' && (
-        <div className="relative" style={{ height: laneVirtualizer.getTotalSize() + PAD * 2 }}>
-          {laneVirtualizer.getVirtualItems().map(v => {
-            const f = files[v.index]
-            if (!f) return null
-            return (
-              <div
-                key={v.key}
-                className="absolute left-0 top-0"
-                style={{
-                  width: colW,
-                  height: Math.max(1, v.size - GAP),
-                  transform: `translate(${PAD + v.lane * (colW + GAP)}px, ${v.start + PAD}px)`,
-                }}
-              >
-                <TileOrThumb
-                  file={f}
-                  selected={f.id === selectedId}
-                  onSelect={() => select(f.id)}
-                  onOpen={() => openItem(f)}
-                />
-              </div>
-            )
-          })}
-        </div>
-      )}
+          {layout === 'waterfall' && (
+            <div className="relative" style={{ height: laneVirtualizer.getTotalSize() + PAD * 2 }}>
+              {laneVirtualizer.getVirtualItems().map(v => {
+                const f = files[v.index]
+                if (!f) return null
+                return (
+                  <div
+                    key={v.key}
+                    className="absolute left-0 top-0"
+                    style={{
+                      width: colW,
+                      height: Math.max(1, v.size - GAP),
+                      transform: `translate(${PAD + v.lane * (colW + GAP)}px, ${v.start + PAD}px)`,
+                    }}
+                  >
+                    {withMenu(f, tile(f))}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
-      {layout === 'justified' && (
-        <div className="relative" style={{ height: justVirtualizer.getTotalSize() + PAD * 2 }}>
-          {justVirtualizer.getVirtualItems().map(v => {
-            const row = justRows[v.index]
-            if (!row) return null
-            const rowFiles = files.slice(row.start, row.start + row.count)
-            return (
-              <div
-                key={v.key}
-                className="absolute top-0 flex"
-                style={{ left: PAD, right: PAD, gap: GAP, height: row.height, transform: `translateY(${v.start + PAD}px)` }}
-              >
-                {rowFiles.map(f => (
-                  <TileOrThumb
-                    key={f.id}
-                    file={f}
-                    width={row.height / aspectOf(f)}
-                    height={row.height}
-                    selected={f.id === selectedId}
-                    onSelect={() => select(f.id)}
-                    onOpen={() => openItem(f)}
-                  />
-                ))}
-              </div>
-            )
-          })}
-        </div>
-      )}
+          {layout === 'justified' && (
+            <div className="relative" style={{ height: justVirtualizer.getTotalSize() + PAD * 2 }}>
+              {justVirtualizer.getVirtualItems().map(v => {
+                const row = justRows[v.index]
+                if (!row) return null
+                const rowFiles = files.slice(row.start, row.start + row.count)
+                return (
+                  <div
+                    key={v.key}
+                    className="absolute top-0 flex"
+                    style={{ left: PAD, right: PAD, gap: GAP, height: row.height, transform: `translateY(${v.start + PAD}px)` }}
+                  >
+                    {rowFiles.map(f => withMenu(f, tile(f, {
+                      width: row.height / aspectOf(f),
+                      height: row.height,
+                    })))}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
-      {layout === 'detail' && (
-        <div>
-          <div className="sticky top-0 z-10 flex h-9 items-center gap-3 border-b bg-background px-4 text-xs text-muted-foreground">
-            <span className="w-11 shrink-0" />
-            <span className="min-w-0 flex-1">名称</span>
-            <span className="w-24 shrink-0 text-right">尺寸</span>
-            <span className="w-20 shrink-0 text-right">大小</span>
-            <span className="w-36 shrink-0 text-right">修改日期</span>
-          </div>
-          <div className="relative" style={{ height: detailVirtualizer.getTotalSize() + PAD, paddingTop: PAD }}>
-            {detailVirtualizer.getVirtualItems().map(v => {
-              const f = files[v.index]
-              if (!f) return null
-              return (
-                <div
-                  key={v.key}
-                  className="absolute left-0 right-0"
-                  style={{ transform: `translateY(${v.start}px)` }}
-                >
-                  <DetailRow
-                    file={f}
-                    selected={f.id === selectedId}
-                    onSelect={() => select(f.id)}
-                    onOpen={() => openItem(f)}
-                  />
-                </div>
-              )
-            })}
-          </div>
+          {layout === 'detail' && (
+            <div>
+              <div className="sticky top-0 z-10 flex h-9 items-center gap-3 border-b bg-background px-4 text-xs text-muted-foreground">
+                <span className="w-11 shrink-0" />
+                <span className="min-w-0 flex-1">名称</span>
+                <span className="w-24 shrink-0 text-right">尺寸</span>
+                <span className="w-20 shrink-0 text-right">大小</span>
+                <span className="w-36 shrink-0 text-right">修改日期</span>
+              </div>
+              <div className="relative" style={{ height: detailVirtualizer.getTotalSize() + PAD, paddingTop: PAD }}>
+                {detailVirtualizer.getVirtualItems().map(v => {
+                  const f = files[v.index]
+                  if (!f) return null
+                  return (
+                    <div
+                      key={v.key}
+                      className="absolute left-0 right-0"
+                      style={{ transform: `translateY(${v.start}px)` }}
+                    >
+                      {withMenu(f, (
+                        <DetailRow
+                          file={f}
+                          selected={f.id === selectedId}
+                          dimmed={!!cutNames?.has(f.name)}
+                          onSelect={() => select(f.id)}
+                          onOpen={() => openItem(f)}
+                        />
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          disabled={!clipboard}
+          onClick={() => void pasteIntoCurrent()}
+        >
+          粘贴{clipboard ? `（${clipboard.entries.length} 项）` : ''}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void createFolderInCurrent()}>新建文件夹</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
