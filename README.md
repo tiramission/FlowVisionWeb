@@ -1,5 +1,12 @@
 # FlowVision Web
 
+[![CI](https://github.com/tiramission/FlowVisionWeb/actions/workflows/ci.yml/badge.svg)](https://github.com/tiramission/FlowVisionWeb/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tiramission/FlowVisionWeb.svg?color=blue)](https://github.com/tiramission/FlowVisionWeb/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![PWA](https://img.shields.io/badge/PWA-%E5%8F%AF%E5%AE%89%E8%A3%85-5A0FC8.svg?logo=pwa)](https://tiramission.github.io/FlowVisionWeb/)
+
+**[在线使用 / 安装为应用](https://tiramission.github.io/FlowVisionWeb/)** —— Chrome / Edge 打开即可安装为桌面应用，支持图片文件关联。
+
 [FlowVision](https://github.com/netdcy/FlowVision)（macOS 瀑布流图片查看器）的 Web 版实现。
 
 ## 技术栈
