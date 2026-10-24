@@ -81,13 +81,13 @@ export function SettingsDialog() {
         </TooltipTrigger>
         <TooltipContent>设置</TooltipContent>
       </Tooltip>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
           <DialogDescription>所有设置即时生效并自动保存</DialogDescription>
         </DialogHeader>
 
-        <div className="-mx-1 grid grid-cols-[132px_1fr] gap-2">
+        <div className="-mx-1 grid grid-cols-[136px_1fr] gap-3">
           <nav className="flex flex-col gap-0.5 border-r pr-2">
             {SECTIONS.map(s => (
               <button
@@ -107,7 +107,7 @@ export function SettingsDialog() {
             ))}
           </nav>
 
-          <div className="max-h-[52dvh] overflow-y-auto px-1">
+          <div className="max-h-[62dvh] overflow-y-auto px-1">
             {section === 'appearance' && (
               <div>
                 <Row label="主题">
@@ -179,15 +179,14 @@ export function SettingsDialog() {
               <div>
                 <Row
                   label="右键手势"
-                  hint="快速右键 = 菜单；按住约 0.35 秒出现罗盘后，拖到外圈触发切换文件夹，Ctrl+Z 可撤销"
+                  hint="快速右键 = 菜单；按住约 0.35 秒出现罗盘后拖到外圈触发，Ctrl+Z 撤销"
                 >
                   <Switch checked={settings.gestureEnabled} onCheckedChange={v => setSetting({ gestureEnabled: v })} aria-label="右键手势" />
                 </Row>
                 <Separator />
                 <div className="py-2.5 text-xs leading-relaxed text-muted-foreground">
-                  <p>· 手势与菜单互不干扰：只要按住后立刻松开（不足 0.35 秒），一定打开菜单。</p>
-                  <p>· 关闭手势后，右键仅打开菜单。</p>
-                  <p>· 方向：← / → 上/下一有图文件夹（跳过空文件夹），↑ 上级，↓ 返回上一目录。</p>
+                  <p>方向：← / → 上、下一有图文件夹（跳过空文件夹）· ↑ 上级 · ↓ 返回上一目录</p>
+                  <p>关闭手势后，右键仅打开菜单。</p>
                 </div>
               </div>
             )}
@@ -211,11 +210,11 @@ export function SettingsDialog() {
             )}
 
             {section === 'shortcuts' && (
-              <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 py-1">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 py-1">
                 {SHORTCUTS.map(([keys, desc]) => (
-                  <div key={keys} className="contents">
-                    <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap">{keys}</kbd>
-                    <span className="text-xs text-muted-foreground">{desc}</span>
+                  <div key={keys} className="flex min-w-0 items-center gap-2">
+                    <kbd className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap">{keys}</kbd>
+                    <span className="truncate text-xs text-muted-foreground" title={desc}>{desc}</span>
                   </div>
                 ))}
               </div>
