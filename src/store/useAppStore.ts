@@ -22,6 +22,8 @@ export interface Settings {
   columnWidth: number
   /** 右键手势（按住右键 350ms 激活罗盘后拖动触发），关闭后右键仅弹菜单 */
   gestureEnabled: boolean
+  /** 画廊自动滚动播放（空格键切换，滚轮/点击打断，到底自动停） */
+  autoScroll: boolean
   /** 视频断点续播（对标原版 videoPlayRememberPosition，默认开） */
   rememberVideoPos: boolean
   /** 视频顺序连播（对标原版 videoPlaySequentialPlay） */
@@ -39,6 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   defaultLayout: 'waterfall',
   columnWidth: 220,
   gestureEnabled: true,
+  autoScroll: false,
   rememberVideoPos: true,
   autoPlayNext: false,
   videoVolume: 1,

@@ -264,19 +264,55 @@ export function Viewer() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // 拖拽平移（仅左键；右键保留给手势）
+  // 拖拽平移（仅左键；右键保留给手势）。
+  // 长按临时缩放（对标原版）：按住不动 400ms——左键切 100%、右键切适应窗口，
+  // 松开还原原视图；期间位移超过 8px 视为拖拽/手势，取消长按
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null)
+  const holdRef = useRef<{
+    timer: number
+    button: number
+    x: number
+    y: number
+    saved: { scale: number; offset: { x: number; y: number } } | null
+  }>({ timer: 0, button: -1, x: 0, y: 0, saved: null })
+  const clearHoldTimer = () => window.clearTimeout(holdRef.current.timer)
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    dragRef.current = { x: e.clientX, y: e.clientY, ox: viewRef.current.offset.x, oy: viewRef.current.offset.y }
+    if (e.button === 0) {
+      // 合成/失效指针（如自动化事件）调用 capture 会抛 NotFoundError 中断后续逻辑
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch { /* 指针不可捕获时拖拽降级为无捕获模式 */ }
+      dragRef.current = { x: e.clientX, y: e.clientY, ox: viewRef.current.offset.x, oy: viewRef.current.offset.y }
+    }
+    if ((e.button === 0 || e.button === 2) && natural && !isVideo) {
+      clearHoldTimer()
+      holdRef.current = { timer: 0, button: e.button, x: e.clientX, y: e.clientY, saved: null }
+      holdRef.current.timer = window.setTimeout(() => {
+        const h = holdRef.current
+        h.saved = { scale: viewRef.current.scale, offset: { ...viewRef.current.offset } }
+        if (h.button === 0) setScale(1) // 长按左键：原始大小
+        else setScale(fitScale()) // 长按右键：适应窗口
+        setOffset({ x: 0, y: 0 })
+      }, 400)
+    }
   }
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current
-    if (!d) return
-    setOffset({ x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y })
+    if (d) setOffset({ x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y })
+    const h = holdRef.current
+    if (h.timer && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 8) clearHoldTimer()
   }
-  const onPointerUp = () => { dragRef.current = null }
+  const onPointerUp = () => {
+    dragRef.current = null
+    const h = holdRef.current
+    if (h.timer) clearHoldTimer()
+    if (h.saved) {
+      // 松开还原长按前的视图
+      setScale(h.saved.scale)
+      setOffset(h.saved.offset)
+      h.saved = null
+    }
+  }
 
   if (!file) return null
 
@@ -571,7 +607,7 @@ export function Viewer() {
         <span>
           {isVideo
             ? '双击全屏 · 空格播放/暂停 · ←/→ 切换 · ,/. 倍速 · Esc 退出'
-            : '双击关闭 · 滚轮缩放 · 拖拽平移 · ←/→ 切换 · 0 适应窗口 · 1 原始大小'}
+            : '双击关闭 · 滚轮缩放 · 拖拽平移 · 长按左键 100% · 长按右键适应 · ←/→ 切换 · 0/1 视图'}
         </span>
       </div>
     </div>

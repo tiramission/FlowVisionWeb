@@ -30,6 +30,7 @@ const LAYOUT_OPTIONS: { value: LayoutType; label: string }[] = [
 
 const SHORTCUTS: [string, string][] = [
   ['Ctrl+F / /', '聚焦搜索'],
+  ['空格', '画廊自动滚动播放 开/关'],
   ['Enter / 双击', '打开（文件夹进入 / 图片大图）'],
   ['←→↑↓', '移动选中（感知布局列数）'],
   ['W / A / S / D', '上级 / 上一有图文件夹 / 返回 / 下一有图文件夹'],
@@ -161,6 +162,10 @@ export function SettingsDialog() {
                     value={[settings.gap]}
                     onValueChange={vals => setSetting({ gap: vals[0] ?? settings.gap })}
                   />
+                </Row>
+                <Separator />
+                <Row label="自动滚动播放" hint="画廊匀速向下滚动浏览（空格键开关），滚轮/点击打断，到底自动停">
+                  <Switch checked={settings.autoScroll} onCheckedChange={v => setSetting({ autoScroll: v })} aria-label="自动滚动播放" />
                 </Row>
                 <Separator />
                 <Row label="滚动灵敏度" hint={sensitivity === 1 ? '原生滚动' : `${sensitivity.toFixed(2)}x`}>

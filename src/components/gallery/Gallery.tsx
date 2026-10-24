@@ -169,6 +169,35 @@ export function Gallery() {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [dirChain])
 
+  // 自动滚动播放（对标原版 AutoScrollPlay）：60px/s 匀速滚动，
+  // 滚轮/点击等交互立即打断，滚动到底自动停止
+  const autoScroll = useAppStore(s => s.settings.autoScroll)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!autoScroll || !el) return
+    let raf = 0
+    let last = performance.now()
+    const stop = () => useAppStore.getState().setSetting({ autoScroll: false })
+    const step = (now: number) => {
+      el.scrollTop += 0.06 * (now - last)
+      last = now
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) {
+        stop()
+        useAppStore.getState().showToast('已滚动到底部，自动播放停止')
+        return
+      }
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    el.addEventListener('wheel', stop, { passive: true })
+    el.addEventListener('pointerdown', stop)
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener('wheel', stop)
+      el.removeEventListener('pointerdown', stop)
+    }
+  }, [autoScroll])
+
   // 网格：按目标列宽取整；瀑布流：四舍五入；justified/detail 同瀑布流（键盘导航用）
   const cols = width > 0
     ? (layout === 'grid'
@@ -312,6 +341,15 @@ export function Gallery() {
         }
       }
       if (inField) return
+      if (e.key === ' ') {
+        // 空格切换自动滚动播放（避免触发聚焦按钮）
+        if (!(target instanceof Element && target.closest('button, [role="slider"], select, a'))) {
+          e.preventDefault()
+          const s = useAppStore.getState()
+          s.setSetting({ autoScroll: !s.settings.autoScroll })
+        }
+        return
+      }
       if (e.key === 'F2' && selected) {
         e.preventDefault()
         setRenameTarget(selected)
