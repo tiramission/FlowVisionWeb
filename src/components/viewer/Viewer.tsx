@@ -289,10 +289,19 @@ export function Viewer() {
       holdRef.current = { timer: 0, button: e.button, x: e.clientX, y: e.clientY, saved: null }
       holdRef.current.timer = window.setTimeout(() => {
         const h = holdRef.current
-        h.saved = { scale: viewRef.current.scale, offset: { ...viewRef.current.offset } }
-        if (h.button === 0) setScale(1) // 长按左键：原始大小
-        else setScale(fitScale()) // 长按右键：适应窗口
-        setOffset({ x: 0, y: 0 })
+        const el = canvasRef.current
+        if (!el || !natural) return
+        const { scale: s, offset: o } = viewRef.current
+        // 以按下的指针位置为锚点缩放（与滚轮缩放同数学）：
+        // 指针下的图像点在新缩放下保持原位，不产生内容跳移
+        const rect = el.getBoundingClientRect()
+        const px = h.x - rect.left - rect.width / 2
+        const py = h.y - rect.top - rect.height / 2
+        const next = h.button === 0 ? 1 : fitScale() // 左键 100% / 右键适应
+        const k = next / s
+        h.saved = { scale: s, offset: { ...o } }
+        setScale(next)
+        setOffset({ x: px - (px - o.x) * k, y: py - (py - o.y) * k })
       }, 400)
     }
   }
