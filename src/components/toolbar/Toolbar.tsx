@@ -1,11 +1,15 @@
-import { ArrowUpDown, Columns3, FolderOpen, FolderTree, LayoutGrid, List, LoaderCircle, Moon, Rows3, Sun } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { ArrowUpDown, Columns3, FolderOpen, FolderTree, LayoutGrid, List, LoaderCircle, Moon, Regex, Rows3, Search, Sun, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useSortedFiles } from '@/hooks/useSortedFiles'
+import { warmupPinyin } from '@/lib/search'
 import { useAppStore } from '@/store/useAppStore'
 import type { LayoutType, SortType } from '@/types'
 import { cn } from '@/lib/utils'
@@ -14,6 +18,8 @@ const SORT_OPTIONS: { value: SortType; label: string }[] = [
   { value: 'name', label: '名称' },
   { value: 'size', label: '大小' },
   { value: 'date', label: '修改日期' },
+  { value: 'type', label: '类型' },
+  { value: 'random', label: '随机' },
 ]
 
 const LAYOUT_OPTIONS: { value: LayoutType; label: string; icon: React.ReactNode }[] = [
@@ -46,6 +52,8 @@ export function Toolbar() {
   const recursive = useAppStore(s => s.recursive)
   const sortType = useAppStore(s => s.sortType)
   const sortAsc = useAppStore(s => s.sortAsc)
+  const searchQuery = useAppStore(s => s.searchQuery)
+  const searchRegex = useAppStore(s => s.searchRegex)
   const theme = useAppStore(s => s.theme)
   const openDirectory = useAppStore(s => s.openDirectory)
   const setLayout = useAppStore(s => s.setLayout)
@@ -53,7 +61,33 @@ export function Toolbar() {
   const toggleRecursive = useAppStore(s => s.toggleRecursive)
   const setSortType = useAppStore(s => s.setSortType)
   const toggleSortAsc = useAppStore(s => s.toggleSortAsc)
+  const setSearchQuery = useAppStore(s => s.setSearchQuery)
+  const setSearchRegex = useAppStore(s => s.setSearchRegex)
+  const select = useAppStore(s => s.select)
   const toggleTheme = useAppStore(s => s.toggleTheme)
+
+  const visibleFiles = useSortedFiles()
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // Ctrl+F / "/" 唤起搜索
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const inField = e.target instanceof HTMLElement
+        && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        warmupPinyin()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      } else if (e.key === '/' && !inField) {
+        e.preventDefault()
+        warmupPinyin()
+        searchRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
@@ -69,8 +103,66 @@ export function Toolbar() {
         </span>
       )}
       {status === 'ready' && (
-        <span className="text-xs text-muted-foreground">{fileCount} 个文件</span>
+        <span className="text-xs text-muted-foreground">
+          {searchQuery && visibleFiles.length !== fileCount
+            ? `${visibleFiles.length} / ${fileCount} 个文件`
+            : `${fileCount} 个文件`}
+        </span>
       )}
+
+      <div className="relative ml-1 flex items-center">
+        <Search className="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
+        <Input
+          ref={searchRef}
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          onFocus={warmupPinyin}
+          onKeyDown={e => {
+            // 输入中不触发全局导航键（W/S/Esc 等）
+            e.stopPropagation()
+            if (e.key === 'Escape') {
+              if (searchQuery) setSearchQuery('')
+              else e.currentTarget.blur()
+            } else if (e.key === 'Enter') {
+              const first = visibleFiles[0]
+              if (first) select(first.id)
+            } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+              e.preventDefault()
+              e.currentTarget.select()
+            }
+          }}
+          placeholder="搜索（Ctrl+F）"
+          className="h-8 w-44 pl-7 pr-16"
+          spellCheck={false}
+        />
+        <div className="absolute right-1 flex items-center gap-0.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Toggle
+                variant="outline"
+                size="sm"
+                className="size-6 gap-0 p-0"
+                pressed={searchRegex}
+                onPressedChange={v => setSearchRegex(v)}
+                aria-label="正则模式"
+              >
+                <Regex className="size-3.5" />
+              </Toggle>
+            </TooltipTrigger>
+            <TooltipContent>正则表达式</TooltipContent>
+          </Tooltip>
+          {searchQuery && (
+            <button
+              type="button"
+              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => setSearchQuery('')}
+              aria-label="清空搜索"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="ml-auto flex items-center gap-1.5">
         <Select value={sortType} onValueChange={v => setSortType(v as SortType)}>

@@ -36,6 +36,12 @@ interface AppStore {
   recursive: boolean
   sortType: SortType
   sortAsc: boolean
+  /** 随机排序种子，切方向/重选随机时更新以重洗 */
+  randomSeed: number
+  searchQuery: string
+  searchRegex: boolean
+  /** 拼音字典按需加载完成（就绪后需重新过滤一次） */
+  pinyinReady: boolean
   selectedId: string | null
   viewerId: string | null
   theme: ThemeMode
@@ -49,6 +55,9 @@ interface AppStore {
   goForward: () => void
   /** 切换递归模式并立即重扫 */
   toggleRecursive: () => void
+  setSearchQuery: (q: string) => void
+  setSearchRegex: (b: boolean) => void
+  setPinyinReady: () => void
   /** 展开/折叠目录树节点，首次展开时懒加载子目录 */
   toggleDir: (key: string, chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
   toggleSidebar: () => void
@@ -132,6 +141,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     recursive: false,
     sortType: 'name',
     sortAsc: true,
+    randomSeed: 1,
+    searchQuery: '',
+    searchRegex: false,
+    pinyinReady: false,
     selectedId: null,
     viewerId: null,
     theme: initTheme(),
@@ -193,6 +206,16 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
 
+    setSearchQuery: q => set({ searchQuery: q }),
+    setSearchRegex: b => set({ searchRegex: b }),
+    setPinyinReady: () => set({ pinyinReady: true }),
+
+    toggleSortAsc: () => set(s => ({
+      sortAsc: !s.sortAsc,
+      // 随机排序没有方向语义，方向按钮作为重洗触发
+      randomSeed: s.sortType === 'random' ? s.randomSeed + 1 : s.randomSeed,
+    })),
+
     toggleRecursive: () => {
       set(s => ({ recursive: !s.recursive }))
       get().rescan()
@@ -201,7 +224,6 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLayout: layout => set({ layout }),
     setColumnWidth: w => set({ columnWidth: w }),
     setSortType: t => set({ sortType: t }),
-    toggleSortAsc: () => set(s => ({ sortAsc: !s.sortAsc })),
     select: id => set({ selectedId: id }),
     openViewer: id => set({ viewerId: id, selectedId: id }),
     setViewerId: id => set({ viewerId: id, selectedId: id ?? get().selectedId }),

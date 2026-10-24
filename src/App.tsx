@@ -8,6 +8,7 @@ import { PathBar } from '@/components/pathbar/PathBar'
 import { DirTree } from '@/components/sidebar/DirTree'
 import { Toolbar } from '@/components/toolbar/Toolbar'
 import { Viewer } from '@/components/viewer/Viewer'
+import { PINYIN_READY_EVENT } from '@/lib/search'
 import { useAppStore } from '@/store/useAppStore'
 
 const THEME_KEY = 'fv-theme'
@@ -46,6 +47,13 @@ function App() {
       localStorage.setItem(THEME_KEY, theme)
     } catch { /* 隐私模式下 localStorage 可能不可用 */ }
   }, [theme])
+
+  // 拼音字典异步加载完成后触发一次重过滤（拼音匹配从无到有）
+  useEffect(() => {
+    const onReady = () => useAppStore.getState().setPinyinReady()
+    window.addEventListener(PINYIN_READY_EVENT, onReady)
+    return () => window.removeEventListener(PINYIN_READY_EVENT, onReady)
+  }, [])
 
   const hasRoot = status !== 'idle'
 

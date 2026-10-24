@@ -5,7 +5,7 @@ export type FileType = 'image' | 'video' | 'folder'
 
 export type LayoutType = 'waterfall' | 'justified' | 'grid' | 'detail'
 
-export type SortType = 'name' | 'size' | 'date'
+export type SortType = 'name' | 'size' | 'date' | 'type' | 'random'
 
 export type ThemeMode = 'light' | 'dark'
 

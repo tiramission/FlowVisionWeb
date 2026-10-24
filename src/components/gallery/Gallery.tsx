@@ -73,6 +73,8 @@ export function Gallery() {
   const columnWidth = useAppStore(s => s.columnWidth)
   const selectedId = useAppStore(s => s.selectedId)
   const dirChain = useAppStore(s => s.dirChain)
+  const totalFiles = useAppStore(s => s.files.length)
+  const searchQuery = useAppStore(s => s.searchQuery)
   const select = useAppStore(s => s.select)
   const openViewer = useAppStore(s => s.openViewer)
   const navigateTo = useAppStore(s => s.navigateTo)
@@ -223,7 +225,9 @@ export function Gallery() {
   if (!files.length) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        该文件夹中没有可显示的图片或视频
+        {searchQuery && totalFiles > 0
+          ? `没有匹配「${searchQuery}」的文件`
+          : '该文件夹中没有可显示的图片或视频'}
       </div>
     )
   }
