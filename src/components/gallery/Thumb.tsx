@@ -1,5 +1,7 @@
 import { Film } from 'lucide-react'
 import { useFileUrl } from '@/hooks/useFileUrl'
+import { useThumbUrl } from '@/hooks/useThumbUrl'
+import { DIRECT_EXTS } from '@/lib/thumb/cache'
 import { useAppStore } from '@/store/useAppStore'
 import type { FileModel } from '@/types'
 import { cn } from '@/lib/utils'
@@ -15,7 +17,14 @@ interface ThumbProps {
 }
 
 export function Thumb({ file, selected, onSelect, onOpen, width, height }: ThumbProps) {
-  const url = useFileUrl(file.handle)
+  // GIF（保留动画）/ SVG（无法位图化）直连原文件；其余走缩略图缓存，失败回退原文件
+  const thumbable = file.type === 'image' && !DIRECT_EXTS.has(file.ext)
+  const thumb = useThumbUrl(thumbable ? file : null)
+  const direct = useFileUrl(!thumbable ? file.handle : null)
+  const fallback = useFileUrl(thumb.failed ? file.handle : null)
+  const url = thumb.url ?? direct ?? fallback
+  // 缩略图的 natural 尺寸是缩放后的，尺寸回填只能用原图
+  const isOriginal = url !== null && (!thumbable || thumb.failed) && !!url
   const reportSize = useAppStore(s => s.reportSize)
 
   return (
@@ -42,6 +51,7 @@ export function Thumb({ file, selected, onSelect, onOpen, width, height }: Thumb
           decoding="async"
           className="h-full w-full object-cover"
           onLoad={e => {
+            if (!isOriginal) return
             // 头部解析失败的格式（AVIF 等）在这里回填真实尺寸，驱动瀑布流重排
             const img = e.currentTarget
             if (img.naturalWidth > 0) reportSize(file.id, img.naturalWidth, img.naturalHeight)

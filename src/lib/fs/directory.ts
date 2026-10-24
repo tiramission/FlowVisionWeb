@@ -122,11 +122,12 @@ export async function readDirectory(dir: FileSystemDirectoryHandle, opts: ScanOp
   return [...folders, ...files]
 }
 
-/** 取目录内第一个图片文件句柄（文件夹堆叠缩略图预览用） */
-export async function getFirstImageFile(dir: FileSystemDirectoryHandle): Promise<FileSystemFileHandle | null> {
+/** 取目录内第一个图片（文件夹堆叠缩略图预览用），带元信息供缓存键使用 */
+export async function getFirstImage(dir: FileSystemDirectoryHandle): Promise<{ handle: FileSystemFileHandle; file: File; ext: string } | null> {
   for await (const handle of (dir as IterableDirectoryHandle).values()) {
     if (handle.kind === 'file' && IMAGE_EXTENSIONS.has(extOf(handle.name))) {
-      return handle as FileSystemFileHandle
+      const fh = handle as FileSystemFileHandle
+      return { handle: fh, file: await fh.getFile(), ext: extOf(handle.name) }
     }
   }
   return null

@@ -3,8 +3,10 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { Film, Folder } from 'lucide-react'
 import { useFileUrl } from '@/hooks/useFileUrl'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
+import { useThumbUrl } from '@/hooks/useThumbUrl'
 import { formatBytes, formatDate } from '@/lib/format'
 import { computeJustifiedRows } from '@/lib/layout/justified'
+import { DIRECT_EXTS, PRELOAD_NEXT, PRELOAD_PRE, thumbCache } from '@/lib/thumb/cache'
 import { useAppStore } from '@/store/useAppStore'
 import { aspectOf, type FileModel } from '@/types'
 import { cn } from '@/lib/utils'
@@ -22,7 +24,10 @@ function DetailRow({ file, selected, onSelect, onOpen }: {
   onSelect: () => void
   onOpen: () => void
 }) {
-  const url = useFileUrl(file.handle)
+  const thumbable = file.type === 'image' && !DIRECT_EXTS.has(file.ext)
+  const thumb = useThumbUrl(thumbable ? file : null)
+  const direct = useFileUrl(!thumbable && file.type === 'image' ? file.handle : null)
+  const url = thumb.url ?? direct
   return (
     <div
       data-file-id={file.id}
@@ -135,6 +140,38 @@ export function Gallery() {
   useEffect(() => { laneVirtualizer.measure() }, [files, width, cols, colW, layout, laneVirtualizer])
   useEffect(() => { justVirtualizer.measure() }, [justRows, justVirtualizer])
   useEffect(() => { detailVirtualizer.measure() }, [layout, detailVirtualizer])
+
+  // 滚动方向预加载窗口（对标原版 PRELOAD_THUMB_RANGE_PRE/NEXT）：
+  // 把可视范围前后一定数量的图片低优先级送入缩略图缓存，滚到时直接命中内存
+  const visibleRange = (() => {
+    if (layout === 'grid') {
+      const items = rowVirtualizer.getVirtualItems()
+      if (!items.length) return null
+      return {
+        first: items[0].index * cols,
+        last: Math.min(files.length - 1, (items[items.length - 1].index + 1) * cols - 1),
+      }
+    }
+    if (layout === 'justified') {
+      const items = justVirtualizer.getVirtualItems()
+      if (!items.length || !justRows.length) return null
+      const firstRow = justRows[items[0].index]
+      const lastRow = justRows[items[items.length - 1].index]
+      if (!firstRow || !lastRow) return null
+      return { first: firstRow.start, last: lastRow.start + lastRow.count - 1 }
+    }
+    const items = layout === 'waterfall' ? laneVirtualizer.getVirtualItems() : detailVirtualizer.getVirtualItems()
+    if (!items.length) return null
+    return { first: items[0].index, last: items[items.length - 1].index }
+  })()
+
+  useEffect(() => {
+    if (!visibleRange || !files.length) return
+    const lo = Math.max(0, visibleRange.first - PRELOAD_PRE)
+    const hi = Math.min(files.length - 1, visibleRange.last + PRELOAD_NEXT)
+    if (lo > hi) return
+    thumbCache.preload(files.slice(lo, hi + 1))
+  }, [visibleRange?.first, visibleRange?.last, files])
 
   // 选中项滚动到可见区域
   useEffect(() => {

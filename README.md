@@ -33,9 +33,9 @@
 
 - [x] 尺寸头部解析（PNG/GIF/BMP/WebP/JPEG/ICO/SVG，不整图解码）
 - [x] 未知格式尺寸回填（缩略图加载后上报 naturalWidth/Height）
-- [ ] 缩略图缓存（生成小图 + LRU/IndexedDB）
-- [ ] 内存上限管理
-- [ ] 滚动方向预加载窗口
+- [x] 缩略图缓存（大于 768px 的图 createImageBitmap 缩放 + webp 重编码，IndexedDB 持久化跨会话复用，配额满/私有模式静默降级）
+- [x] 内存上限管理（64MB / 600 条目 LRU，引用计数保护可视区条目不被淘汰；GIF/SVG/小图直连原文件）
+- [x] 滚动方向预加载窗口（可视区前 20 后 40，低优先级队列，对标原版 PRELOAD_THUMB_RANGE）
 
 ### 大图查看器
 
