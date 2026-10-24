@@ -67,6 +67,24 @@ export function Viewer() {
     return () => document.removeEventListener('fullscreenchange', onFs)
   }, [])
 
+  // 控制栏自动隐藏：视频播放中鼠标静止 2.8s 淡出，移动/操作即唤醒
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const controlsTimerRef = useRef(0)
+  const wakeControls = () => {
+    setControlsVisible(true)
+    window.clearTimeout(controlsTimerRef.current)
+    controlsTimerRef.current = window.setTimeout(() => {
+      const v = videoRef.current
+      if (v && !v.paused && !v.ended) setControlsVisible(false)
+    }, 2800)
+  }
+  useEffect(() => () => window.clearTimeout(controlsTimerRef.current), [])
+  // 打开/切换视频即启动首次倒计时（否则鼠标不动永远不会触发隐藏）
+  useEffect(() => {
+    if (isVideo) wakeControls()
+    // eslint 无配置，忽略 exhausive-deps
+  }, [file?.id, isVideo])
+
   // 视频倍速档位（对标原版 videoPlaybackRate），[ ] 或 </> 键调节
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
   const stepRate = (delta: number) => {
@@ -219,7 +237,11 @@ export function Viewer() {
   // 键盘：Esc 关闭、←/→ 切换、+/- 缩放、0 适应窗口、1 原始大小、</>（Shift+,/.）视频倍速、空格播放/暂停
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { closeViewer(); return }
+      if (e.key === 'Escape') {
+        // 全屏中 Esc 先退全屏，不连带关闭查看器
+        if (document.fullscreenElement) { void document.exitFullscreen(); return }
+        closeViewer(); return
+      }
       if (e.key === 'ArrowLeft') { nav(-1); return }
       if (e.key === 'ArrowRight') { nav(1); return }
       if (e.key === ' ') {
@@ -266,13 +288,14 @@ export function Viewer() {
       data-viewer-root
       className="fixed inset-0 z-50 flex select-none flex-col bg-black/95 text-white cursor-grab active:cursor-grabbing"
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
+      onPointerMove={e => { onPointerMove(e); if (isVideo) wakeControls() }}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onDoubleClick={isVideo ? toggleFullscreen : closeViewer}
     >
+      {/* 视频全屏时隐藏顶栏/底栏，画面独占整屏 */}
       <div
-        className="relative z-10 flex h-12 shrink-0 items-center gap-2 px-3"
+        className={`relative z-10 flex h-12 shrink-0 items-center gap-2 px-3 ${isVideo && isFullscreen ? 'hidden' : ''}`}
         onPointerDown={stopForControls}
         onDoubleClick={stopForControls}
       >
@@ -423,6 +446,7 @@ export function Viewer() {
               volume={settings.videoVolume}
               rate={settings.videoPlaybackRate}
               isFullscreen={isFullscreen}
+              visible={controlsVisible}
               onTogglePlay={() => {
                 const v = videoRef.current
                 if (!v) return
@@ -542,7 +566,7 @@ export function Viewer() {
         )}
       </div>
 
-      <div className="flex h-10 shrink-0 items-center justify-center gap-3 text-[11px] text-white/50">
+      <div className={`flex h-10 shrink-0 items-center justify-center gap-3 text-[11px] text-white/50 ${isVideo && isFullscreen ? 'hidden' : ''}`}>
         <span className="tabular-nums">{index + 1} / {files.length}</span>
         <span>
           {isVideo
@@ -562,8 +586,10 @@ function fmtTime(t: number): string {
 }
 
 /** 视频自定义控制栏（对标原版 VideoPlayerControlsView 的精简版）：
- *  固定 48px 高，不随视频缩放与全屏变化——原生 controls 会随视频
- *  元素缩放（大图时过小、全屏时过大），且无法用 CSS 调整 */
+ *  固定 48px 高且悬浮于画面底部（不占视频空间），不随视频缩放/全屏变化
+ *  ——原生 controls 会随视频元素缩放（大图时过小、全屏时过大）且无法用
+ *  CSS 调整。高亮用白色系：控制栏底是黑色半透明，主题 primary 在亮色
+ *  模式下接近黑灰会看不清 */
 function VideoControls(props: {
   videoRef: React.RefObject<HTMLVideoElement | null>
   playing: boolean
@@ -573,6 +599,7 @@ function VideoControls(props: {
   volume: number
   rate: number
   isFullscreen: boolean
+  visible: boolean
   onTogglePlay: () => void
   onSeek: (t: number) => void
   onVolumeChange: (v: number) => void
@@ -580,7 +607,7 @@ function VideoControls(props: {
   onToggleFullscreen: () => void
 }) {
   const {
-    playing, currentTime, duration, muted, volume, rate, isFullscreen,
+    playing, currentTime, duration, muted, volume, rate, isFullscreen, visible,
     onTogglePlay, onSeek, onVolumeChange, onToggleMute, onToggleFullscreen,
   } = props
   const barRef = useRef<HTMLDivElement>(null)
@@ -600,9 +627,10 @@ function VideoControls(props: {
 
   return (
     <div
-      className="flex h-12 shrink-0 items-center gap-2 border-t border-white/10 bg-black/70 px-3 backdrop-blur-sm select-none"
+      className={`absolute inset-x-0 bottom-0 z-10 flex h-12 items-center gap-2 bg-gradient-to-t from-black/85 to-black/30 px-3 backdrop-blur-[2px] select-none transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0'}`}
       onPointerDown={e => e.stopPropagation()}
       onDoubleClick={e => e.stopPropagation()}
+      onPointerMove={e => e.stopPropagation()}
     >
       <button type="button" className={btn} onClick={onTogglePlay} aria-label={playing ? '暂停' : '播放'}>
         {playing ? <Pause className="size-5" /> : <Play className="size-5" />}
@@ -627,11 +655,11 @@ function VideoControls(props: {
           setDragRatio(null)
         }}
       >
-        <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
-          <div className="h-full rounded-full bg-primary" style={{ width: `${ratio * 100}%` }} />
+        <div className="h-1 w-full overflow-hidden rounded-full bg-white/25">
+          <div className="h-full rounded-full bg-white" style={{ width: `${ratio * 100}%` }} />
         </div>
         <div
-          className="absolute size-3 rounded-full bg-primary shadow ring-2 ring-black/40 transition-transform group-hover:scale-110"
+          className="absolute size-3 rounded-full bg-white shadow ring-2 ring-black/40 transition-transform group-hover:scale-110"
           style={{ left: `calc(${ratio * 100}% - 6px)` }}
         />
       </div>
@@ -642,7 +670,7 @@ function VideoControls(props: {
         {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
       </button>
       <Slider
-        className="w-20 shrink-0"
+        className="w-20 shrink-0 [&_[data-slot=slider-range]]:bg-white [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-white"
         min={0}
         max={1}
         step={0.01}
