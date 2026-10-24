@@ -4,8 +4,13 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vite'
 
+// GitHub Pages 部署在 /FlowVisionWeb/ 子路径：CI 通过 DEPLOY_BASE 注入，
+// 本地 dev 不设置（根路径），保证两种环境构建互不干扰
+const base = process.env.DEPLOY_BASE ?? '/'
+
 // https://vite.dev/config/
 export default defineConfig({
+  base,
   plugins: [
     react(),
     tailwindcss(),
@@ -17,6 +22,9 @@ export default defineConfig({
         short_name: 'FlowVision',
         description: '瀑布流图片浏览器：四级布局、两级加载、手势导航、文件管理',
         lang: 'zh-CN',
+        // 相对作用域：子路径部署（/FlowVisionWeb/）与根部署都正确
+        start_url: './',
+        scope: './',
         display: 'standalone',
         orientation: 'any',
         theme_color: '#0ea5e9',
@@ -41,6 +49,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         // 字体与图标走缓存优先；HTML/SW 入口默认网络优先由 precache 覆盖
         navigateFallback: 'index.html',
+        // 子路径部署时让 Workbox 以相对路径解析（默认用 base）
       },
       devOptions: {
         // 开发模式下启用 SW（http://localhost 可注册），便于联调安装/更新流程

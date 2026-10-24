@@ -122,6 +122,16 @@ src/
 └── types/             # FileModel 等数据模型（对标原版 DataModel.swift / Enum.swift）
 ```
 
+## 安装为应用（PWA）
+
+Chrome / Edge 访问 [GitHub Pages 线上地址](https://tiramission.github.io/FlowVisionWeb/)，地址栏右侧出现安装图标即可安装为桌面应用；应用内也会弹出安装横幅。
+
+- 独立窗口运行（无浏览器地址栏），应用壳离线可用
+- 安装后在系统「打开方式」中可关联 jpg/png/gif/webp/avif/bmp/svg，双击图片直接用本应用打开
+- 新版本发布后应用内右下角提示刷新
+
+本地开发联调 PWA： 后在 http://localhost:5199 同样可安装。
+
 ## 开发
 
 ```bash
