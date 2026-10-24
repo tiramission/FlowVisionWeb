@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Film, Folder } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -24,12 +24,13 @@ function clipEntryOf(file: FileModel): ClipEntry | null {
   return handle ? { name: file.name, handle } : null
 }
 
-/** 条目右键菜单（打开/复制/剪切/重命名/删除），asChild 不引入额外 DOM 节点 */
+/** 条目右键菜单（打开/复制/剪切/重命名/删除）。children 必须是透传 HTML 属性的瓦片组件，
+ *  asChild 才能把 contextmenu 事件挂到真实 DOM 上；变淡用 cloneElement 注入 className */
 function ItemMenu({ file, onOpen, dimmed, children }: {
   file: FileModel
   onOpen: () => void
   dimmed: boolean
-  children: React.ReactElement
+  children: React.ReactElement<React.HTMLAttributes<HTMLElement>>
 }) {
   const copyEntries = useAppStore(s => s.copyEntries)
   const cutEntries = useAppStore(s => s.cutEntries)
@@ -39,7 +40,9 @@ function ItemMenu({ file, onOpen, dimmed, children }: {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        {dimmed ? <div className="opacity-50">{children}</div> : children}
+        {dimmed
+          ? cloneElement(children, { className: `${children.props.className ?? ''} opacity-50`.trim() })
+          : children}
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onClick={onOpen}>
@@ -66,14 +69,14 @@ function ItemMenu({ file, onOpen, dimmed, children }: {
   )
 }
 
-/** detail 布局单行（模块级组件，保证虚拟滚动行不被重挂载） */
-function DetailRow({ file, selected, dimmed, onSelect, onOpen }: {
+/** detail 布局单行（模块级组件，保证虚拟滚动行不被重挂载；透传属性供 asChild 挂事件） */
+function DetailRow({ file, selected, dimmed, onSelect, onOpen, className, ...rest }: {
   file: FileModel
   selected: boolean
   dimmed: boolean
   onSelect: () => void
   onOpen: () => void
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   const thumbable = file.type === 'image' && !DIRECT_EXTS.has(file.ext)
   const thumb = useThumbUrl(thumbable ? file : null)
   const direct = useFileUrl(!thumbable && file.type === 'image' ? file.handle : null)
@@ -87,8 +90,10 @@ function DetailRow({ file, selected, dimmed, onSelect, onOpen }: {
         'flex cursor-pointer items-center gap-3 rounded-md px-4',
         selected ? 'bg-accent' : 'hover:bg-accent/50',
         dimmed && 'opacity-50',
+        className,
       )}
       style={{ height: DETAIL_ROW_H }}
+      {...rest}
     >
       <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">
         {file.type === 'folder' ? (
@@ -327,7 +332,7 @@ export function Gallery() {
     )
   }
 
-  const withMenu = (f: FileModel, node: React.ReactElement) => (
+  const withMenu = (f: FileModel, node: React.ReactElement<React.HTMLAttributes<HTMLElement>>) => (
     <ItemMenu key={f.id} file={f} dimmed={!!cutNames?.has(f.name)} onOpen={() => openItem(f)}>
       {node}
     </ItemMenu>
@@ -458,7 +463,7 @@ export function Gallery() {
   )
 }
 
-/** 文件夹渲染堆叠瓦片，媒体渲染缩略图 */
+/** 文件夹渲染堆叠瓦片，媒体渲染缩略图（透传属性供 asChild 挂事件） */
 function TileOrThumb(props: {
   file: FileModel
   selected: boolean
@@ -466,7 +471,7 @@ function TileOrThumb(props: {
   onOpen: () => void
   width?: number
   height?: number
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   const { file, ...rest } = props
   if (file.type === 'folder') {
     return <FolderTile file={file} {...rest} />

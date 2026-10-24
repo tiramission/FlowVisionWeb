@@ -6,7 +6,7 @@ import { useAppStore } from '@/store/useAppStore'
 import type { FileModel } from '@/types'
 import { cn } from '@/lib/utils'
 
-interface ThumbProps {
+interface ThumbProps extends React.HTMLAttributes<HTMLDivElement> {
   file: FileModel
   selected: boolean
   onSelect: () => void
@@ -16,7 +16,8 @@ interface ThumbProps {
   height?: number
 }
 
-export function Thumb({ file, selected, onSelect, onOpen, width, height }: ThumbProps) {
+// 透传 ...rest（含 ContextMenuTrigger asChild 注入的事件处理器与 ref）
+export function Thumb({ file, selected, onSelect, onOpen, width, height, className, ...rest }: ThumbProps) {
   // GIF（保留动画）/ SVG（无法位图化）直连原文件；其余走缩略图缓存，失败回退原文件
   const thumbable = file.type === 'image' && !DIRECT_EXTS.has(file.ext)
   const thumb = useThumbUrl(thumbable ? file : null)
@@ -36,8 +37,10 @@ export function Thumb({ file, selected, onSelect, onOpen, width, height }: Thumb
       className={cn(
         'relative cursor-pointer overflow-hidden rounded-md border bg-muted transition-shadow',
         selected ? 'border-primary ring-2 ring-primary' : 'border-border hover:ring-2 hover:ring-ring',
+        className,
       )}
       style={{ width: width ?? '100%', height: height ?? '100%' }}
+      {...rest}
     >
       {file.type === 'video' ? (
         <div className="flex h-full w-full items-center justify-center">

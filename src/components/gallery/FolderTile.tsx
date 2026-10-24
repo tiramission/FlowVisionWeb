@@ -3,7 +3,7 @@ import { useFolderPreviewUrl } from '@/hooks/useFolderPreviewUrl'
 import type { FileModel } from '@/types'
 import { cn } from '@/lib/utils'
 
-interface FolderTileProps {
+interface FolderTileProps extends React.HTMLAttributes<HTMLDivElement> {
   file: FileModel
   selected: boolean
   onSelect: () => void
@@ -14,7 +14,7 @@ interface FolderTileProps {
 }
 
 /** 文件夹瓦片：以目录内首个图片做堆叠式缩略图（对标原版 thumbnailOfFolderUseStacking） */
-export function FolderTile({ file, selected, onSelect, onOpen, width, height }: FolderTileProps) {
+export function FolderTile({ file, selected, onSelect, onOpen, width, height, className, ...rest }: FolderTileProps) {
   const url = useFolderPreviewUrl(file.dirHandle)
 
   return (
@@ -26,8 +26,10 @@ export function FolderTile({ file, selected, onSelect, onOpen, width, height }: 
       className={cn(
         'relative cursor-pointer rounded-md',
         selected ? 'ring-2 ring-primary ring-offset-1' : 'hover:ring-2 hover:ring-ring',
+        className,
       )}
       style={{ width: width ?? '100%', height: height ?? '100%' }}
+      {...rest}
     >
       <div className="absolute inset-0 rounded-md border bg-muted shadow-sm" style={{ transform: 'translate(-5%, -6%) rotate(-4deg)' }} />
       <div className="absolute inset-0 rounded-md border bg-muted shadow-sm" style={{ transform: 'translate(5%, -3%) rotate(3deg)' }} />
