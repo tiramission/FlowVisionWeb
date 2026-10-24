@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { ArrowUpDown, Columns3, FolderOpen, FolderTree, LayoutGrid, List, LoaderCircle, Moon, Regex, Rows3, Search, Sun, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -56,18 +56,6 @@ export function Toolbar() {
   const searchQuery = useAppStore(s => s.searchQuery)
   const searchRegex = useAppStore(s => s.searchRegex)
   const theme = useAppStore(s => s.theme)
-  // WCO 生效检测（仅安装的 PWA 窗口内为 true）；几何变化实时同步
-  const [wco, setWco] = useState(() => {
-    const o = (navigator as Navigator & { windowControlsOverlay?: { visible: boolean } }).windowControlsOverlay
-    return !!o?.visible
-  })
-  useEffect(() => {
-    const o = (navigator as Navigator & { windowControlsOverlay?: { visible: boolean; geometrychange: Event } & EventTarget }).windowControlsOverlay
-    if (!o) return
-    const onGeo = () => setWco(o.visible)
-    o.addEventListener('geometrychange', onGeo)
-    return () => o.removeEventListener('geometrychange', onGeo)
-  }, [])
   const openDirectory = useAppStore(s => s.openDirectory)
   const setLayout = useAppStore(s => s.setLayout)
   const setSetting = useAppStore(s => s.setSetting)
@@ -105,11 +93,7 @@ export function Toolbar() {
   return (
     // WCO（沉浸式标题栏）态：仅安装的 PWA 生效。顶栏高 48px 基线 +
     // 标题栏区偏移；整条可拖拽窗口，右侧避让系统窗控按钮
-    <header
-      className={cn('fv-drag-region flex shrink-0 items-center gap-2 border-b bg-background px-3', wco ? 'fv-wco' : 'h-12')}
-      style={wco ? { paddingTop: 'env(titlebar-area-y)', height: 'env(titlebar-area-height)', paddingLeft: 'max(0.75rem, env(titlebar-area-x))' } : undefined}
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-2 fv-no-drag [&_*]:fv-no-drag">
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
       <Button size="sm" variant="outline" onClick={openDirectory} disabled={status === 'scanning'}>
         {status === 'scanning'
           ? <LoaderCircle className="animate-spin" />
@@ -262,9 +246,6 @@ export function Toolbar() {
 
         <SettingsDialog />
       </div>
-      </div>
-      {/* 系统窗控按钮（WCO）避让区：titlebar-area-x 即窗控区宽 */}
-      {wco && <div className="fv-no-drag shrink-0" style={{ width: 'env(titlebar-area-x)' }} aria-hidden />}
     </header>
   )
 }

@@ -14,6 +14,7 @@ import { VIDEO_EXTENSIONS } from '@/lib/fs/constants'
 import { useGlobalRightClick } from '@/hooks/useGlobalRightClick'
 import { PwaControls } from '@/components/pwa/PwaControls'
 import { RestoreBanner, useSessionRestore } from '@/components/pwa/SessionRestore'
+import { useTitlebarTheme } from '@/hooks/useTitlebarTheme'
 import { useAppStore } from '@/store/useAppStore'
 import type { FileModel } from '@/types'
 
@@ -90,6 +91,8 @@ function App() {
   useLaunchFiles()
   // 启动恢复上次浏览目录
   useSessionRestore()
+  // 标题栏颜色跟随主题
+  useTitlebarTheme()
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
