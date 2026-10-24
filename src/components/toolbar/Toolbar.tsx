@@ -32,7 +32,6 @@ function ToolButton(props: React.ComponentProps<typeof Button> & { tip: string }
 export function Toolbar() {
   const status = useAppStore(s => s.status)
   const scanProgress = useAppStore(s => s.scanProgress)
-  const rootName = useAppStore(s => s.rootName)
   const fileCount = useAppStore(s => s.files.length)
   const layout = useAppStore(s => s.layout)
   const columnWidth = useAppStore(s => s.columnWidth)
@@ -54,14 +53,6 @@ export function Toolbar() {
           : <FolderOpen />}
         打开文件夹
       </Button>
-      {rootName && (
-        <span
-          className="max-w-64 truncate rounded-md bg-muted px-2 py-0.5 text-sm text-muted-foreground"
-          title={rootName}
-        >
-          {rootName}
-        </span>
-      )}
       {status === 'scanning' && (
         <span className="text-xs text-muted-foreground">
           {scanProgress ? `扫描中 ${scanProgress.done}/${scanProgress.total}` : '读取目录…'}

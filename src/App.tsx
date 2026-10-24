@@ -1,17 +1,38 @@
 import { useEffect } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { EmptyState } from '@/components/gallery/EmptyState'
 import { Gallery } from '@/components/gallery/Gallery'
+import { PathBar } from '@/components/pathbar/PathBar'
+import { DirTree } from '@/components/sidebar/DirTree'
 import { Toolbar } from '@/components/toolbar/Toolbar'
 import { Viewer } from '@/components/viewer/Viewer'
 import { useAppStore } from '@/store/useAppStore'
 
 const THEME_KEY = 'fv-theme'
 
-function App() {
+function MainContent() {
   const status = useAppStore(s => s.status)
   const scanProgress = useAppStore(s => s.scanProgress)
+
+  if (status === 'scanning') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">
+          {scanProgress ? `正在扫描 ${scanProgress.done} / ${scanProgress.total}` : '正在读取目录…'}
+        </p>
+      </div>
+    )
+  }
+  if (status === 'ready') return <Gallery />
+  return <EmptyState />
+}
+
+function App() {
+  const status = useAppStore(s => s.status)
+  const sidebarOpen = useAppStore(s => s.sidebarOpen)
   const viewerId = useAppStore(s => s.viewerId)
   const theme = useAppStore(s => s.theme)
 
@@ -22,22 +43,32 @@ function App() {
     } catch { /* 隐私模式下 localStorage 可能不可用 */ }
   }, [theme])
 
+  const hasRoot = status !== 'idle'
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-dvh flex-col bg-background text-foreground">
         <Toolbar />
-        <main className="relative min-h-0 flex-1">
-          {status === 'idle' && <EmptyState />}
-          {status === 'scanning' && (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                {scanProgress ? `正在扫描 ${scanProgress.done} / ${scanProgress.total}` : '正在读取目录…'}
-              </p>
-            </div>
+        {hasRoot && <PathBar />}
+        <div className="min-h-0 flex-1">
+          {hasRoot && sidebarOpen ? (
+            <ResizablePanelGroup orientation="horizontal" className="h-full">
+              <ResizablePanel defaultSize="20%" minSize="12%" maxSize="40%" className="min-w-0">
+                <DirTree />
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel className="min-w-0">
+                <main className="relative h-full">
+                  <MainContent />
+                </main>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            <main className="relative h-full">
+              <MainContent />
+            </main>
           )}
-          {status === 'ready' && <Gallery />}
-        </main>
+        </div>
         {viewerId && <Viewer />}
       </div>
     </TooltipProvider>

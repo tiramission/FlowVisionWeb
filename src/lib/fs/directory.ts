@@ -68,6 +68,28 @@ export async function readDirectory(
   return models.sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true, sensitivity: 'base' }))
 }
 
+/** 子目录项（目录树懒加载用） */
+export interface SubdirEntry {
+  name: string
+  handle: FileSystemDirectoryHandle
+}
+
+/** 枚举直接子目录，按名称自然序排序 */
+export async function readSubdirs(dir: FileSystemDirectoryHandle): Promise<SubdirEntry[]> {
+  const out: SubdirEntry[] = []
+  for await (const handle of (dir as IterableDirectoryHandle).values()) {
+    if (handle.kind === 'directory') {
+      out.push({ name: handle.name, handle: handle as FileSystemDirectoryHandle })
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true, sensitivity: 'base' }))
+}
+
+/** 目录链的唯一键：从根到当前目录的名字路径 */
+export function dirKey(chain: readonly FileSystemDirectoryHandle[]): string {
+  return chain.map(h => h.name).join('/')
+}
+
 /** 并发解析图片尺寸，分批回调更新（供瀑布流布局用），对标原版多线程缩略图元数据读取 */
 export async function fillImageSizes(
   models: FileModel[],

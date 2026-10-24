@@ -13,7 +13,7 @@ export function Gallery() {
   const layout = useAppStore(s => s.layout)
   const columnWidth = useAppStore(s => s.columnWidth)
   const selectedId = useAppStore(s => s.selectedId)
-  const rootName = useAppStore(s => s.rootName)
+  const dirChain = useAppStore(s => s.dirChain)
   const select = useAppStore(s => s.select)
   const openViewer = useAppStore(s => s.openViewer)
 
@@ -31,7 +31,7 @@ export function Gallery() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [rootName])
+  }, [dirChain])
 
   // 网格：按固定列宽取整；瀑布流：按目标列宽四舍五入
   const cols = width > 0
