@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Maximize, X, ZoomIn, ZoomOut } from 'lucide-react'
+import {
+  ChevronLeft, ChevronRight, Maximize, Pause, Play, Volume2, VolumeX, X, ZoomIn, ZoomOut,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useFileUrl } from '@/hooks/useFileUrl'
 import { usePreviewUrl, useThumbUrl } from '@/hooks/useThumbUrl'
@@ -44,6 +47,25 @@ export function Viewer() {
   const isVideo = file?.type === 'video'
   const videoRef = useRef<HTMLVideoElement>(null)
   const posKey = file && file.handle ? `${dirKey(useAppStore.getState().dirChain)}/${file.relPath}:${file.size}` : ''
+
+  // 视频播放器状态（自定义控制栏，固定尺寸不随视频缩放/全屏变化）
+  const [playing, setPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [muted, setMuted] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current
+    if (!el) return
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void el.requestFullscreen().catch(() => {})
+  }
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
 
   // 视频倍速档位（对标原版 videoPlaybackRate），[ ] 或 </> 键调节
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
@@ -181,11 +203,12 @@ export function Viewer() {
     return () => window.removeEventListener('resize', onResize)
   })
 
-  // 滚轮缩放需要非 passive 监听才能 preventDefault
+  // 滚轮缩放需要非 passive 监听才能 preventDefault（视频不做缩放，滚轮留给系统/未来音量）
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
+      if (useAppStore.getState().viewerId && document.querySelector('[data-viewer-root] video')) return
       e.preventDefault()
       zoomAtRef.current(e.clientX, e.clientY, Math.exp(-e.deltaY * WHEEL_FACTOR))
     }
@@ -193,12 +216,21 @@ export function Viewer() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // 键盘：Esc 关闭、←/→ 切换、+/- 缩放、0 适应窗口、1 原始大小、</>（Shift+,/.）视频倍速
+  // 键盘：Esc 关闭、←/→ 切换、+/- 缩放、0 适应窗口、1 原始大小、</>（Shift+,/.）视频倍速、空格播放/暂停
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { closeViewer(); return }
       if (e.key === 'ArrowLeft') { nav(-1); return }
       if (e.key === 'ArrowRight') { nav(1); return }
+      if (e.key === ' ') {
+        const v = videoRef.current
+        if (v) {
+          e.preventDefault()
+          if (v.paused) void v.play()
+          else v.pause()
+        }
+        return
+      }
       if (e.key === '+' || e.key === '=') { zoomCenter(1.25); return }
       if (e.key === '-') { zoomCenter(1 / 1.25); return }
       if (e.key === '0') { resetView(); return }
@@ -237,7 +269,7 @@ export function Viewer() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onDoubleClick={closeViewer}
+      onDoubleClick={isVideo ? toggleFullscreen : closeViewer}
     >
       <div
         className="relative z-10 flex h-12 shrink-0 items-center gap-2 px-3"
@@ -328,57 +360,98 @@ export function Viewer() {
       </div>
 
       <div ref={canvasRef} className="relative min-h-0 flex-1">
+        {isVideo && url ? (
+          // 视频独立布局：CSS contain 居中（不走 transform 缩放，控制栏尺寸不受影响），
+          // 底部自定义控制栏固定高度，大图与全屏下尺寸一致
+          <div className="absolute inset-0 flex flex-col">
+            <video
+              ref={videoRef}
+              src={url}
+              autoPlay
+              className="min-h-0 w-full flex-1 bg-black object-contain outline-none"
+              onLoadedMetadata={e => {
+                const el = e.currentTarget
+                if (el.videoWidth > 0) {
+                  setNatural(n => n ?? { width: el.videoWidth, height: el.videoHeight })
+                  setDuration(el.duration || 0)
+                }
+                // 应用记忆的音量/倍速/播放位置（对标原版记忆设置）
+                el.volume = Math.min(1, Math.max(0, settings.videoVolume))
+                el.playbackRate = settings.videoPlaybackRate
+                if (settings.rememberVideoPos && posKey) {
+                  const saved = getVideoPos(posKey)
+                  if (saved > 0 && el.duration > 0 && saved < el.duration - 5) {
+                    el.currentTime = saved
+                    showToast(`已恢复到 ${Math.floor(saved / 60)}:${String(Math.floor(saved % 60)).padStart(2, '0')}`)
+                  }
+                }
+              }}
+              onPlay={() => setPlaying(true)}
+              onTimeUpdate={e => {
+                const el = e.currentTarget
+                setCurrentTime(el.currentTime)
+                // 节流保存播放位置
+                if (!settings.rememberVideoPos || !posKey) return
+                const now = Date.now()
+                if (now - lastSaveRef.current < 3000) return
+                lastSaveRef.current = now
+                setVideoPos(posKey, el.currentTime)
+              }}
+              onPause={e => {
+                setPlaying(false)
+                if (settings.rememberVideoPos && posKey) setVideoPos(posKey, e.currentTarget.currentTime)
+              }}
+              onEnded={() => {
+                setPlaying(false)
+                if (posKey) clearVideoPos(posKey)
+                // 顺序连播（对标原版 videoPlaySequentialPlay）
+                if (settings.autoPlayNext && files[index + 1]) setViewerId(files[index + 1].id)
+              }}
+              onVolumeChange={e => {
+                const el = e.currentTarget
+                setMuted(el.muted)
+                const v = el.volume
+                if (!el.muted && v !== settings.videoVolume) setSetting({ videoVolume: v })
+              }}
+            />
+            <VideoControls
+              videoRef={videoRef}
+              playing={playing}
+              currentTime={currentTime}
+              duration={duration}
+              muted={muted}
+              volume={settings.videoVolume}
+              rate={settings.videoPlaybackRate}
+              isFullscreen={isFullscreen}
+              onTogglePlay={() => {
+                const v = videoRef.current
+                if (!v) return
+                if (v.paused) void v.play()
+                else v.pause()
+              }}
+              onSeek={t => { if (videoRef.current) videoRef.current.currentTime = t }}
+              onVolumeChange={v => {
+                if (!videoRef.current) return
+                videoRef.current.volume = v
+                videoRef.current.muted = v === 0
+                setSetting({ videoVolume: v })
+              }}
+              onToggleMute={() => {
+                const v = videoRef.current
+                if (!v) return
+                v.muted = !v.muted
+                setMuted(v.muted)
+              }}
+              onToggleFullscreen={toggleFullscreen}
+            />
+          </div>
+        ) : null}
         <div
-          className="absolute left-1/2 top-1/2 will-change-transform"
+          className={`absolute left-1/2 top-1/2 will-change-transform ${isVideo ? 'hidden' : ''}`}
           style={{ transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
         >
-          {file.type === 'video'
-            ? url && (
-              <video
-                ref={videoRef}
-                src={url}
-                controls
-                autoPlay
-                className={natural ? 'outline-none' : 'max-h-[80dvh] max-w-[90vw] outline-none'}
-                style={natural ? explicitSize(natural) : undefined}
-                onLoadedMetadata={e => {
-                  const el = e.currentTarget
-                  if (el.videoWidth > 0) setNatural(n => n ?? { width: el.videoWidth, height: el.videoHeight })
-                  // 应用记忆的音量/倍速/播放位置（对标原版记忆设置）
-                  el.volume = Math.min(1, Math.max(0, settings.videoVolume))
-                  el.playbackRate = settings.videoPlaybackRate
-                  if (settings.rememberVideoPos && posKey) {
-                    const saved = getVideoPos(posKey)
-                    if (saved > 0 && el.duration > 0 && saved < el.duration - 5) {
-                      el.currentTime = saved
-                      showToast(`已恢复到 ${Math.floor(saved / 60)}:${String(Math.floor(saved % 60)).padStart(2, '0')}`)
-                    }
-                  }
-                }}
-                onTimeUpdate={e => {
-                  // 节流保存播放位置
-                  const el = e.currentTarget
-                  if (!settings.rememberVideoPos || !posKey) return
-                  const now = Date.now()
-                  if (now - lastSaveRef.current < 3000) return
-                  lastSaveRef.current = now
-                  setVideoPos(posKey, el.currentTime)
-                }}
-                onPause={e => {
-                  if (settings.rememberVideoPos && posKey) setVideoPos(posKey, e.currentTarget.currentTime)
-                }}
-                onEnded={() => {
-                  if (posKey) clearVideoPos(posKey)
-                  // 顺序连播（对标原版 videoPlaySequentialPlay）
-                  if (settings.autoPlayNext && files[index + 1]) setViewerId(files[index + 1].id)
-                }}
-                onVolumeChange={e => {
-                  const v = e.currentTarget.volume
-                  if (v !== settings.videoVolume) setSetting({ videoVolume: v })
-                }}
-              />
-            )
-            : previewable && natural ? (
+          {file.type !== 'video' && (
+            previewable && natural ? (
               // 三层堆叠：缩略图秒开 → 预览 → 缩放超阈值后全图淡入。
               // 同宽高比，外层 transform 数学对三层一致，替换无缝。
               // 不依赖全图 URL，首帧不等原图读取
@@ -438,7 +511,7 @@ export function Viewer() {
                   useAppStore.getState().reportSize(file.id, img.naturalWidth, img.naturalHeight)
                 }}
               />
-            )}
+            ))}
         </div>
 
         {index > 0 && (
@@ -471,8 +544,118 @@ export function Viewer() {
 
       <div className="flex h-10 shrink-0 items-center justify-center gap-3 text-[11px] text-white/50">
         <span className="tabular-nums">{index + 1} / {files.length}</span>
-        <span>双击关闭 · 滚轮缩放 · 拖拽平移 · ←/→ 切换 · 0 适应窗口 · 1 原始大小{isVideo ? ' · ,/. 倍速' : ''}</span>
+        <span>
+          {isVideo
+            ? '双击全屏 · 空格播放/暂停 · ←/→ 切换 · ,/. 倍速 · Esc 退出'
+            : '双击关闭 · 滚轮缩放 · 拖拽平移 · ←/→ 切换 · 0 适应窗口 · 1 原始大小'}
+        </span>
       </div>
+    </div>
+  )
+}
+
+function fmtTime(t: number): string {
+  if (!Number.isFinite(t) || t < 0) return '0:00'
+  const m = Math.floor(t / 60)
+  const s = Math.floor(t % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/** 视频自定义控制栏（对标原版 VideoPlayerControlsView 的精简版）：
+ *  固定 48px 高，不随视频缩放与全屏变化——原生 controls 会随视频
+ *  元素缩放（大图时过小、全屏时过大），且无法用 CSS 调整 */
+function VideoControls(props: {
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  playing: boolean
+  currentTime: number
+  duration: number
+  muted: boolean
+  volume: number
+  rate: number
+  isFullscreen: boolean
+  onTogglePlay: () => void
+  onSeek: (t: number) => void
+  onVolumeChange: (v: number) => void
+  onToggleMute: () => void
+  onToggleFullscreen: () => void
+}) {
+  const {
+    playing, currentTime, duration, muted, volume, rate, isFullscreen,
+    onTogglePlay, onSeek, onVolumeChange, onToggleMute, onToggleFullscreen,
+  } = props
+  const barRef = useRef<HTMLDivElement>(null)
+  const [dragRatio, setDragRatio] = useState<number | null>(null)
+  // 拖动只更新预览，松手才真正 seek，避免拖动中频繁跳帧
+  const shown = dragRatio !== null ? dragRatio * duration : currentTime
+  const ratio = duration > 0 ? Math.min(1, shown / duration) : 0
+
+  const ratioAt = (clientX: number) => {
+    const bar = barRef.current
+    if (!bar) return 0
+    const r = bar.getBoundingClientRect()
+    return Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+  }
+
+  const btn = 'flex size-8 shrink-0 items-center justify-center rounded-md text-white/90 hover:bg-white/15 hover:text-white'
+
+  return (
+    <div
+      className="flex h-12 shrink-0 items-center gap-2 border-t border-white/10 bg-black/70 px-3 backdrop-blur-sm select-none"
+      onPointerDown={e => e.stopPropagation()}
+      onDoubleClick={e => e.stopPropagation()}
+    >
+      <button type="button" className={btn} onClick={onTogglePlay} aria-label={playing ? '暂停' : '播放'}>
+        {playing ? <Pause className="size-5" /> : <Play className="size-5" />}
+      </button>
+
+      <div className="w-14 shrink-0 text-center text-xs tabular-nums text-white/75">{fmtTime(shown)}</div>
+
+      <div
+        ref={barRef}
+        className="group relative flex h-5 min-w-0 flex-1 cursor-pointer items-center"
+        onPointerDown={e => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          setDragRatio(ratioAt(e.clientX))
+        }}
+        onPointerMove={e => {
+          if (dragRatio === null) return
+          setDragRatio(ratioAt(e.clientX))
+        }}
+        onPointerUp={e => {
+          if (dragRatio === null) return
+          onSeek(ratioAt(e.clientX) * duration)
+          setDragRatio(null)
+        }}
+      >
+        <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
+          <div className="h-full rounded-full bg-primary" style={{ width: `${ratio * 100}%` }} />
+        </div>
+        <div
+          className="absolute size-3 rounded-full bg-primary shadow ring-2 ring-black/40 transition-transform group-hover:scale-110"
+          style={{ left: `calc(${ratio * 100}% - 6px)` }}
+        />
+      </div>
+
+      <div className="w-14 shrink-0 text-center text-xs tabular-nums text-white/75">{fmtTime(duration)}</div>
+
+      <button type="button" className={btn} onClick={onToggleMute} aria-label="静音">
+        {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+      </button>
+      <Slider
+        className="w-20 shrink-0"
+        min={0}
+        max={1}
+        step={0.01}
+        value={[muted ? 0 : volume]}
+        onValueChange={vals => onVolumeChange(vals[0] ?? 0)}
+        aria-label="音量"
+      />
+
+      <span className="w-10 shrink-0 text-center text-xs tabular-nums text-white/75">{rate}x</span>
+
+      <button type="button" className={btn} onClick={onToggleFullscreen} aria-label="全屏">
+        <Maximize className={`size-5 ${isFullscreen ? 'rotate-180' : ''}`} />
+      </button>
     </div>
   )
 }
