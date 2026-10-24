@@ -32,6 +32,9 @@ export default defineConfig({
         // 相对作用域：子路径部署（/FlowVisionWeb/）与根部署都正确
         start_url: './',
         scope: './',
+        // Window Controls Overlay：应用自绘标题栏（沉浸式，仅系统窗控按钮叠加），
+        // 不支持的浏览器自动回落 standalone
+        display_override: ['window-controls-overlay', 'standalone'],
         display: 'standalone',
         orientation: 'any',
         theme_color: '#0ea5e9',

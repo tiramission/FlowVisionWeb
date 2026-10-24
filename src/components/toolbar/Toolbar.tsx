@@ -91,7 +91,13 @@ export function Toolbar() {
   }, [])
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
+    // WCO（沉浸式标题栏）态：仅安装的 PWA 生效。顶栏高 48px 基线 +
+    // 标题栏区偏移；整条可拖拽窗口，右侧避让系统窗控按钮
+    <header
+      className="fv-drag-region flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3"
+      style={{ paddingTop: 'env(titlebar-area-y, 0px)', height: 'max(3rem, env(titlebar-area-height, 3rem))' }}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2 fv-no-drag [&_*]:fv-no-drag">
       <Button size="sm" variant="outline" onClick={openDirectory} disabled={status === 'scanning'}>
         {status === 'scanning'
           ? <LoaderCircle className="animate-spin" />
@@ -244,6 +250,9 @@ export function Toolbar() {
 
         <SettingsDialog />
       </div>
+      </div>
+      {/* 系统窗控按钮（WCO）避让区：与标题栏环境宽度对齐 */}
+      <div className="fv-no-drag shrink-0" style={{ width: 'env(titlebar-area-x, 0px)' }} aria-hidden />
     </header>
   )
 }
