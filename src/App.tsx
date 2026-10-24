@@ -13,6 +13,7 @@ import { PINYIN_READY_EVENT } from '@/lib/search'
 import { VIDEO_EXTENSIONS } from '@/lib/fs/constants'
 import { useGlobalRightClick } from '@/hooks/useGlobalRightClick'
 import { PwaControls } from '@/components/pwa/PwaControls'
+import { RestoreBanner, useSessionRestore } from '@/components/pwa/SessionRestore'
 import { useAppStore } from '@/store/useAppStore'
 import type { FileModel } from '@/types'
 
@@ -87,6 +88,8 @@ function App() {
   useGlobalRightClick()
   // PWA 启动文件（系统打开方式）
   useLaunchFiles()
+  // 启动恢复上次浏览目录
+  useSessionRestore()
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -143,6 +146,7 @@ function App() {
         {viewerId && <Viewer />}
         <ActionDialogs />
         <PwaControls />
+        <RestoreBanner />
       </div>
     </TooltipProvider>
   )

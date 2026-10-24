@@ -164,6 +164,10 @@ export function SettingsDialog() {
                   />
                 </Row>
                 <Separator />
+                <Row label="启动恢复上次文件夹" hint="重开应用时回到上次浏览的目录（需重新授权时出现横幅）">
+                  <Switch checked={settings.restoreLastFolder} onCheckedChange={v => setSetting({ restoreLastFolder: v })} aria-label="启动恢复上次文件夹" />
+                </Row>
+                <Separator />
                 <Row label="自动滚动播放" hint="画廊匀速向下滚动浏览（空格键开关），滚轮/点击打断，到底自动停">
                   <Switch checked={settings.autoScroll} onCheckedChange={v => setSetting({ autoScroll: v })} aria-label="自动滚动播放" />
                 </Row>

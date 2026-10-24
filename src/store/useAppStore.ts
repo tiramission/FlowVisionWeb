@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { saveLastSession } from '@/lib/session'
 import { addFavorite, listFavorites, removeFavorite, type FavItem } from '@/lib/favorites'
 import { dirKey, fillImageSizes, hasMedia, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
 import { copyEntry, createDirectory, deleteEntry, ensureReadPermission, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
@@ -20,6 +21,8 @@ export interface Settings {
   defaultLayout: LayoutType
   /** 缩略图大小 */
   columnWidth: number
+  /** 启动时恢复上次浏览的文件夹（对标原版 openLastFolder） */
+  restoreLastFolder: boolean
   /** 右键手势（按住右键 350ms 激活罗盘后拖动触发），关闭后右键仅弹菜单 */
   gestureEnabled: boolean
   /** 画廊自动滚动播放（空格键切换，滚轮/点击打断，到底自动停） */
@@ -40,6 +43,7 @@ const DEFAULT_SETTINGS: Settings = {
   pureBlack: false,
   defaultLayout: 'waterfall',
   columnWidth: 220,
+  restoreLastFolder: true,
   gestureEnabled: true,
   autoScroll: false,
   rememberVideoPos: true,
@@ -132,6 +136,9 @@ interface AppStore {
   /** 收藏夹（对标原版 myFavoritesArray），IDB 持久化 */
   favorites: FavItem[]
   favoritesLoaded: boolean
+  /** 上次会话恢复：待授权的目录链（显示恢复横幅）与恢复动作 */
+  restorePending: FileSystemDirectoryHandle[] | null
+  restoreLastSession: () => Promise<void>
   /** PWA file_handler 启动传入的文件（无目录链，画廊直接展示） */
   launchFiles: FileModel[]
   setLaunchFiles: (files: FileModel[]) => void
@@ -200,6 +207,8 @@ export const useAppStore = create<AppStore>((set, get) => {
   const browse = async (chain: readonly FileSystemDirectoryHandle[], push: boolean, silent = false) => {
     const gen = ++scanGeneration
     const dir = chain[chain.length - 1]
+    // 会话持久化（对标原版 openLastFolder）：导航即记录，重开恢复
+    void saveLastSession(chain)
     set(s => {
       const truncated = push ? s.historyChains.slice(0, s.historyIndex + 1) : s.historyChains
       const historyChains = push ? [...truncated, [...chain]] : s.historyChains
@@ -274,6 +283,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     favorites: [],
     favoritesLoaded: false,
     launchFiles: [],
+    restorePending: null,
     gestureUndoStack: [],
     ctxMenuTargetId: null,
 
@@ -364,6 +374,19 @@ export const useAppStore = create<AppStore>((set, get) => {
     setPinyinReady: () => set({ pinyinReady: true }),
 
     setLaunchFiles: files => set({ launchFiles: files }),
+
+    restoreLastSession: async () => {
+      const s = get()
+      const chain = s.restorePending
+      if (!chain) return
+      set({ restorePending: null })
+      const root = chain[0]
+      if (!(await ensureReadPermission(root))) {
+        s.showToast('未获得文件夹访问权限', 'error')
+        return
+      }
+      await get().navigateTo(chain)
+    },
 
     showToast: (text, kind = 'info') => {
       if (toastTimer !== null) window.clearTimeout(toastTimer)
