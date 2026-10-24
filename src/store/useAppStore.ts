@@ -132,6 +132,9 @@ interface AppStore {
   /** 收藏夹（对标原版 myFavoritesArray），IDB 持久化 */
   favorites: FavItem[]
   favoritesLoaded: boolean
+  /** PWA file_handler 启动传入的文件（无目录链，画廊直接展示） */
+  launchFiles: FileModel[]
+  setLaunchFiles: (files: FileModel[]) => void
   /** 右键手势跳转撤销栈（Ctrl+Z 逐级回退），最多 30 条 */
   gestureUndoStack: GestureUndoEntry[]
   pushGestureUndo: (entry: GestureUndoEntry) => void
@@ -270,6 +273,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     toast: null,
     favorites: [],
     favoritesLoaded: false,
+    launchFiles: [],
     gestureUndoStack: [],
     ctxMenuTargetId: null,
 
@@ -358,6 +362,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     setSearchQuery: q => set({ searchQuery: q }),
     setSearchRegex: b => set({ searchRegex: b }),
     setPinyinReady: () => set({ pinyinReady: true }),
+
+    setLaunchFiles: files => set({ launchFiles: files }),
 
     showToast: (text, kind = 'info') => {
       if (toastTimer !== null) window.clearTimeout(toastTimer)

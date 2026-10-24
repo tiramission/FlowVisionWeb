@@ -10,12 +10,51 @@ import { DirTree } from '@/components/sidebar/DirTree'
 import { Toolbar } from '@/components/toolbar/Toolbar'
 import { Viewer } from '@/components/viewer/Viewer'
 import { PINYIN_READY_EVENT } from '@/lib/search'
+import { VIDEO_EXTENSIONS } from '@/lib/fs/constants'
 import { useGlobalRightClick } from '@/hooks/useGlobalRightClick'
+import { PwaControls } from '@/components/pwa/PwaControls'
 import { useAppStore } from '@/store/useAppStore'
+import type { FileModel } from '@/types'
+
+/** PWA file_handler 启动：系统「打开方式」传入图片 → 虚拟目录展示 */
+function useLaunchFiles() {
+  useEffect(() => {
+    const nav = navigator as Navigator & { launchQueue?: { setConsumer: (cb: (params: { files: FileSystemFileHandle[] }) => void) => void } }
+    nav.launchQueue?.setConsumer(async params => {
+      if (!params.files?.length) return
+      const models: FileModel[] = []
+      for (const fh of params.files) {
+        try {
+          const file = await fh.getFile()
+          const dot = fh.name.lastIndexOf('.')
+          const ext = dot === -1 ? '' : fh.name.slice(dot + 1).toLowerCase()
+          if (!FILE_EXT_OK(ext)) continue
+          models.push({
+            id: fh.name,
+            name: fh.name,
+            relPath: fh.name,
+            ext,
+            type: VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image',
+            size: file.size,
+            lastModified: file.lastModified,
+            handle: fh,
+          })
+        } catch { /* 跳过不可读文件 */ }
+      }
+      if (models.length) useAppStore.getState().setLaunchFiles(models)
+    })
+  }, [])
+}
+
+function FILE_EXT_OK(ext: string): boolean {
+  // 与画廊一致：受支持的图片/视频扩展名
+  return VIDEO_EXTENSIONS.has(ext) || ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'avif', 'bmp', 'svg', 'ico', 'apng'].includes(ext)
+}
 
 function MainContent() {
   const status = useAppStore(s => s.status)
   const scanProgress = useAppStore(s => s.scanProgress)
+  const launchFiles = useAppStore(s => s.launchFiles)
 
   if (status === 'scanning') {
     return (
@@ -31,6 +70,8 @@ function MainContent() {
       </div>
     )
   }
+  // PWA 启动文件（系统「打开方式」）：直接进画廊浏览
+  if (status === 'idle' && launchFiles.length > 0) return <Gallery />
   if (status === 'ready') return <Gallery />
   return <EmptyState />
 }
@@ -44,6 +85,8 @@ function App() {
 
   // 全应用右键接管 + 手势（应用全生命周期，含空状态/加载态）
   useGlobalRightClick()
+  // PWA 启动文件（系统打开方式）
+  useLaunchFiles()
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -99,6 +142,7 @@ function App() {
         </div>
         {viewerId && <Viewer />}
         <ActionDialogs />
+        <PwaControls />
       </div>
     </TooltipProvider>
   )
