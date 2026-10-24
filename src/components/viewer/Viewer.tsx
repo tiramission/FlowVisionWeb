@@ -322,7 +322,8 @@ export function Viewer() {
         const k = next / s
         h.saved = { scale: s, offset: { ...o } }
         setScale(next)
-        setOffset({ x: px - (px - o.x) * k, y: py - (py - o.y) * k })
+        // clamp：右键 fit 自动归零居中；左键 1x 获得边缘限位保护
+        setOffset(clampOffset(next, { x: px - (px - o.x) * k, y: py - (py - o.y) * k }))
       }, 400)
     }
   }
