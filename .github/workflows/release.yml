@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: 打包 dist 为 zip
+        run: cd dist && zip -r ../flowvision-web-${{ github.ref_name }}.zip . && cd ..
+
+      # 创建 Release 骨架（正文留空，发布后手动编写）
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FlowVision Web ${{ github.ref_name }}
+          body: ''
+          files: flowvision-web-${{ github.ref_name }}.zip
