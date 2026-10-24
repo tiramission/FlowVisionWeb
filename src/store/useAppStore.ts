@@ -130,6 +130,9 @@ interface AppStore {
   gestureUndoStack: GestureUndoEntry[]
   pushGestureUndo: (entry: GestureUndoEntry) => void
   undoLastGesture: () => void
+  /** 右键菜单命中的条目 id（null = 空白区域），由全局右键 hook 在派发前设置 */
+  ctxMenuTargetId: string | null
+  setCtxMenuTargetId: (id: string | null) => void
   openDirectory: () => Promise<void>
   /** 导航到目标目录链并扫描，push=true 时写入历史；silent 平滑刷新不闪列表 */
   navigateTo: (chain: readonly FileSystemDirectoryHandle[], silent?: boolean) => Promise<void>
@@ -262,6 +265,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     favorites: [],
     favoritesLoaded: false,
     gestureUndoStack: [],
+    ctxMenuTargetId: null,
 
     openDirectory: async () => {
       const dir = await pickDirectory()
@@ -376,6 +380,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       void get().navigateTo(entry.chain, true)
         .then(() => get().showToast(`已撤销：${entry.label}`))
     },
+
+    setCtxMenuTargetId: id => set({ ctxMenuTargetId: id }),
 
     toggleFavoriteCurrent: async () => {
       const s = get()

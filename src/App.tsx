@@ -10,6 +10,7 @@ import { DirTree } from '@/components/sidebar/DirTree'
 import { Toolbar } from '@/components/toolbar/Toolbar'
 import { Viewer } from '@/components/viewer/Viewer'
 import { PINYIN_READY_EVENT } from '@/lib/search'
+import { useGlobalRightClick } from '@/hooks/useGlobalRightClick'
 import { useAppStore } from '@/store/useAppStore'
 
 function MainContent() {
@@ -40,6 +41,9 @@ function App() {
   const viewerId = useAppStore(s => s.viewerId)
   const theme = useAppStore(s => s.theme)
   const settings = useAppStore(s => s.settings)
+
+  // 全应用右键接管 + 手势（应用全生命周期，含空状态/加载态）
+  useGlobalRightClick()
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')

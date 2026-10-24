@@ -1,4 +1,4 @@
-import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Film, Folder } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -23,48 +23,43 @@ function clipEntryOf(file: FileModel): ClipEntry | null {
   return handle ? { name: file.name, handle } : null
 }
 
-/** 条目右键菜单（打开/复制/剪切/重命名/删除）。children 必须是透传 HTML 属性的瓦片组件，
- *  asChild 才能把 contextmenu 事件挂到真实 DOM 上；变淡用 cloneElement 注入 className */
-function ItemMenu({ file, onOpen, dimmed, children }: {
-  file: FileModel
-  onOpen: () => void
-  dimmed: boolean
-  children: React.ReactElement<React.HTMLAttributes<HTMLElement>>
-}) {
+/** 单一右键菜单的内容：命中条目 = 条目操作，空白 = 目录操作 */
+function MenuItems({ file, onOpen }: { file: FileModel | null; onOpen: (f: FileModel) => void }) {
   const copyEntries = useAppStore(s => s.copyEntries)
   const cutEntries = useAppStore(s => s.cutEntries)
   const setRenameTarget = useAppStore(s => s.setRenameTarget)
   const setDeleteTarget = useAppStore(s => s.setDeleteTarget)
 
+  if (!file) {
+    return (
+      <>
+        <ContextMenuItem onClick={() => void useAppStore.getState().pasteIntoCurrent()}>
+          粘贴
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void useAppStore.getState().createFolderInCurrent()}>
+          新建文件夹
+        </ContextMenuItem>
+      </>
+    )
+  }
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        {dimmed
-          ? cloneElement(children, { className: `${children.props.className ?? ''} opacity-50`.trim() })
-          : children}
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onClick={onOpen}>
-          {file.type === 'folder' ? '打开' : '查看大图'}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => { const e = clipEntryOf(file); if (e) copyEntries([e]) }}
-        >
-          复制
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => { const e = clipEntryOf(file); if (e) cutEntries([e]) }}
-        >
-          剪切
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => setRenameTarget(file)}>重命名…</ContextMenuItem>
-        <ContextMenuItem className="text-destructive" onClick={() => setDeleteTarget(file)}>
-          删除…
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <ContextMenuItem onClick={() => onOpen(file)}>
+        {file.type === 'folder' ? '打开' : '查看大图'}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => { const e = clipEntryOf(file); if (e) copyEntries([e]) }}>
+        复制
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => { const e = clipEntryOf(file); if (e) cutEntries([e]) }}>
+        剪切
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => setRenameTarget(file)}>重命名…</ContextMenuItem>
+      <ContextMenuItem className="text-destructive" onClick={() => setDeleteTarget(file)}>
+        删除…
+      </ContextMenuItem>
+    </>
   )
 }
 
@@ -135,15 +130,21 @@ export function Gallery() {
   const totalFiles = useAppStore(s => s.files.length)
   const searchQuery = useAppStore(s => s.searchQuery)
   const clipboard = useAppStore(s => s.clipboard)
+  const ctxMenuTargetId = useAppStore(s => s.ctxMenuTargetId)
   const select = useAppStore(s => s.select)
   const openViewer = useAppStore(s => s.openViewer)
   const navigateTo = useAppStore(s => s.navigateTo)
   const pasteIntoCurrent = useAppStore(s => s.pasteIntoCurrent)
-  const createFolderInCurrent = useAppStore(s => s.createFolderInCurrent)
   const setRenameTarget = useAppStore(s => s.setRenameTarget)
   const setDeleteTarget = useAppStore(s => s.setDeleteTarget)
   const copyEntries = useAppStore(s => s.copyEntries)
   const cutEntries = useAppStore(s => s.cutEntries)
+
+  // 右键菜单命中的条目（null = 空白区域 → 目录操作）
+  const ctxMenuFile = useMemo(
+    () => (ctxMenuTargetId ? files.find(f => f.id === ctxMenuTargetId) ?? null : null),
+    [ctxMenuTargetId, files],
+  )
 
   // 剪切中的条目变淡（对标原版 cutItemPaths 变淡效果）
   const cutNames = useMemo(() => {
@@ -262,152 +263,6 @@ export function Gallery() {
     thumbCache.preload(files.slice(lo, hi + 1))
   }, [visibleRange?.first, visibleRange?.last, files])
 
-  // 右键手势（对标原版 RightMouseGesture）：浏览与大图查看器内均可用，
-  // 按住右键即浮出方向罗盘，拖到外圈（56px，进度环可视化）才触发，
-  // 防止点击时手抖误触；Ctrl+Z 可撤销手势跳转。
-  // 无拖动的右键在画廊内由 mouseup 派发合成事件打开应用菜单（大图内无菜单）。
-  // 拦截挂在 window 捕获层（比 document/Radix 同节点监听更早，无时序漏洞），
-  // 用 zone 检查圈定范围，区域内的原生菜单始终接管
-  const gestureRef = useRef({ active: false, x: 0, y: 0, fired: false })
-  const bypassMenuRef = useRef(false)
-  useEffect(() => {
-    const SHOW_DIST = 10
-    const FIRE_DIST = 56
-    const CIRC = 2 * Math.PI * 26 // 与下方进度环 SVG 的 r=26 一致
-
-    // 8 扇区（屏幕坐标 y 向下）：索引 = round(atan2(dy,dx)/45°)
-    const SECTORS: { deg: number; label: string; act: () => void }[] = [
-      { deg: 90, label: '下一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(1) },
-      { deg: 135, label: '', act: () => {} }, // down_right：原版为关闭窗口，浏览态无对应
-      { deg: 180, label: '返回', act: () => useAppStore.getState().goBack() },
-      { deg: 225, label: '', act: () => {} },
-      { deg: 270, label: '上一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(-1) },
-      { deg: 315, label: '上一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(-1) },
-      { deg: 0, label: '上级目录', act: () => useAppStore.getState().goUp() },
-      { deg: 45, label: '下一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(1) },
-    ]
-    const sectorOf = (dx: number, dy: number) =>
-      ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8
-
-    // 轨迹浮层（纯 DOM，避免 mousemove 触发 React 重渲染）
-    const ov = document.createElement('div')
-    ov.className = 'fixed z-[90] pointer-events-none flex flex-col items-center gap-1.5'
-    ov.style.display = 'none'
-    ov.innerHTML = `
-      <div class="fv-g-ring relative flex size-16 items-center justify-center rounded-full border-2 border-border bg-background/90 shadow-lg backdrop-blur-sm text-muted-foreground">
-        <svg class="absolute inset-0" viewBox="0 0 64 64">
-          <circle cx="32" cy="32" r="26" fill="none" stroke="#888" stroke-opacity="0.25" stroke-width="3"/>
-          <circle class="fv-g-bar" cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${CIRC.toFixed(1)}" transform="rotate(-90 32 32)"/>
-        </svg>
-        <svg class="fv-g-arrow relative" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 90ms"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
-      </div>
-      <div class="fv-g-label rounded bg-foreground/85 px-2 py-0.5 text-xs text-background whitespace-nowrap"></div>`
-    document.body.appendChild(ov)
-    const ring = ov.querySelector('.fv-g-ring') as HTMLElement
-    const arrow = ov.querySelector('.fv-g-arrow') as HTMLElement
-    const bar = ov.querySelector('.fv-g-bar') as SVGCircleElement
-    const labelEl = ov.querySelector('.fv-g-label') as HTMLElement
-    let hideTimer = 0
-    const show = (x: number, y: number, sector: number | null, fired: boolean, progress: number) => {
-      ov.style.display = 'flex'
-      ov.style.left = `${x}px`
-      ov.style.top = `${y}px`
-      ov.style.transform = 'translate(-50%, calc(-100% - 20px))'
-      const s = sector === null ? null : SECTORS[sector]
-      arrow.style.transform = `rotate(${s?.deg ?? 0}deg)`
-      bar.style.strokeDashoffset = `${(CIRC * (1 - progress)).toFixed(1)}`
-      labelEl.textContent = s ? (fired ? `${s.label}（Ctrl+Z 撤销）` : s.label) : '拖动到外圈触发'
-      ring.classList.toggle('border-primary', fired)
-      ring.classList.toggle('text-primary', fired)
-      ring.classList.toggle('bg-primary/10', fired)
-    }
-    const hide = () => { ov.style.display = 'none' }
-    const hideSoon = () => {
-      window.clearTimeout(hideTimer)
-      hideTimer = window.setTimeout(hide, 900)
-    }
-
-    const inZone = (target: EventTarget | null): boolean => {
-      if (!(target instanceof Node)) return false
-      const z = scrollRef.current
-      if (z && z.contains(target)) return true
-      // 大图查看器内同样支持手势（原版行为）
-      return target instanceof Element && !!target.closest('[data-viewer-root]')
-    }
-
-    // 区域内原生右键菜单一律接管（合成派发时 bypass 放行给 Radix）
-    const onCtx = (e: MouseEvent) => {
-      if (bypassMenuRef.current || !inZone(e.target)) return
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 2 || !inZone(e.target)) return
-      e.preventDefault()
-      gestureRef.current = { active: true, x: e.clientX, y: e.clientY, fired: false }
-      show(e.clientX, e.clientY, null, false, 0)
-    }
-    const onMove = (e: MouseEvent) => {
-      const g = gestureRef.current
-      if (!g.active) return
-      const dx = e.clientX - g.x
-      const dy = e.clientY - g.y
-      const dist = Math.hypot(dx, dy)
-      if (g.fired) return
-      const sector = sectorOf(dx, dy)
-      if (dist >= FIRE_DIST) {
-        g.fired = true
-        const s = SECTORS[sector]
-        if (s.label) {
-          useAppStore.getState().pushGestureUndo({
-            chain: [...useAppStore.getState().dirChain],
-            label: s.label,
-          })
-        }
-        s.act()
-        show(g.x, g.y, sector, true, 1)
-      } else if (dist >= SHOW_DIST) {
-        show(g.x, g.y, sector, false, (dist - SHOW_DIST) / (FIRE_DIST - SHOW_DIST))
-      }
-    }
-    const onUp = (e: MouseEvent) => {
-      const g = gestureRef.current
-      if (!g.active) return
-      gestureRef.current = { active: false, x: 0, y: 0, fired: false }
-      if (e.button !== 2) return
-      if (g.fired) {
-        hideSoon()
-        return
-      }
-      hide()
-      // 无拖动的右键：仅画廊内合成 contextmenu 打开应用菜单（大图内无菜单）
-      if (useAppStore.getState().viewerId) return
-      if (!(e.target instanceof Node) || !scrollRef.current?.contains(e.target)) return
-      const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-file-id]')
-      const target = (hit as HTMLElement | null) ?? scrollRef.current
-      if (!target) return
-      bypassMenuRef.current = true
-      try {
-        target.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
-        }))
-      } finally {
-        bypassMenuRef.current = false
-      }
-    }
-    window.addEventListener('contextmenu', onCtx, true)
-    window.addEventListener('mousedown', onDown, true)
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => {
-      window.removeEventListener('contextmenu', onCtx, true)
-      window.removeEventListener('mousedown', onDown, true)
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      window.clearTimeout(hideTimer)
-      ov.remove()
-    }
-  }, [])
 
   // 选中项滚动到可见区域
   useEffect(() => {
@@ -497,12 +352,6 @@ export function Gallery() {
     )
   }
 
-  const withMenu = (f: FileModel, node: React.ReactElement<React.HTMLAttributes<HTMLElement>>) => (
-    <ItemMenu key={f.id} file={f} dimmed={!!cutNames?.has(f.name)} onOpen={() => openItem(f)}>
-      {node}
-    </ItemMenu>
-  )
-
   // HTML5 拖拽数据：drop 端（目录树/面包屑）据此找到条目
   const dragProps = (f: FileModel) => ({
     draggable: true,
@@ -518,6 +367,7 @@ export function Gallery() {
       file={f}
       width={size?.width}
       height={size?.height}
+      dimmed={!!cutNames?.has(f.name)}
       selected={f.id === selectedId}
       onSelect={() => select(f.id)}
       onOpen={() => openItem(f)}
@@ -527,7 +377,7 @@ export function Gallery() {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden overscroll-contain', pureBlack && 'bg-black')}>
+        <div ref={scrollRef} data-gallery-root className={cn('h-full overflow-y-auto overflow-x-hidden overscroll-contain', pureBlack && 'bg-black')}>
           {layout === 'grid' && (
             <div className="relative" style={{ height: rowVirtualizer.getTotalSize() + PAD * 2 }}>
               {rowVirtualizer.getVirtualItems().map(vr => {
@@ -538,7 +388,7 @@ export function Gallery() {
                     className="absolute top-0 flex"
                     style={{ left: PAD, right: PAD, gap: gap, transform: `translateY(${vr.start + PAD}px)` }}
                   >
-                    {files.slice(start, start + cols).map(f => withMenu(f, tile(f, { width: columnWidth, height: columnWidth })))}
+                    {files.slice(start, start + cols).map(f => tile(f, { width: columnWidth, height: columnWidth }))}
                   </div>
                 )
               })}
@@ -560,7 +410,7 @@ export function Gallery() {
                       transform: `translate(${PAD + v.lane * (colW + gap)}px, ${v.start + PAD}px)`,
                     }}
                   >
-                    {withMenu(f, tile(f))}
+                    {tile(f)}
                   </div>
                 )
               })}
@@ -579,10 +429,7 @@ export function Gallery() {
                     className="absolute top-0 flex"
                     style={{ left: PAD, right: PAD, gap: gap, height: row.height, transform: `translateY(${v.start + PAD}px)` }}
                   >
-                    {rowFiles.map(f => withMenu(f, tile(f, {
-                      width: row.height / aspectOf(f),
-                      height: row.height,
-                    })))}
+                    {rowFiles.map(f => tile(f, { width: row.height / aspectOf(f), height: row.height }))}
                   </div>
                 )
               })}
@@ -608,16 +455,14 @@ export function Gallery() {
                       className="absolute left-0 right-0"
                       style={{ transform: `translateY(${v.start}px)` }}
                     >
-                      {withMenu(f, (
-                        <DetailRow
-                          {...dragProps(f)}
-                          file={f}
-                          selected={f.id === selectedId}
-                          dimmed={!!cutNames?.has(f.name)}
-                          onSelect={() => select(f.id)}
-                          onOpen={() => openItem(f)}
-                        />
-                      ))}
+                      <DetailRow
+                        {...dragProps(f)}
+                        file={f}
+                        selected={f.id === selectedId}
+                        dimmed={!!cutNames?.has(f.name)}
+                        onSelect={() => select(f.id)}
+                        onOpen={() => openItem(f)}
+                      />
                     </div>
                   )
                 })}
@@ -627,19 +472,13 @@ export function Gallery() {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem
-          disabled={!clipboard}
-          onClick={() => void pasteIntoCurrent()}
-        >
-          粘贴{clipboard ? `（${clipboard.entries.length} 项）` : ''}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => void createFolderInCurrent()}>新建文件夹</ContextMenuItem>
+        <MenuItems file={ctxMenuFile} onOpen={openItem} />
       </ContextMenuContent>
     </ContextMenu>
   )
 }
 
-/** 文件夹渲染堆叠瓦片，媒体渲染缩略图（透传属性供 asChild 挂事件） */
+/** 文件夹渲染堆叠瓦片，媒体渲染缩略图（透传属性供拖拽等使用） */
 function TileOrThumb(props: {
   file: FileModel
   selected: boolean
@@ -647,10 +486,12 @@ function TileOrThumb(props: {
   onOpen: () => void
   width?: number
   height?: number
-} & React.HTMLAttributes<HTMLDivElement>) {
-  const { file, ...rest } = props
+  dimmed?: boolean
+} & Omit<React.HTMLAttributes<HTMLDivElement>, 'dimmed'>) {
+  const { file, dimmed, ...rest } = props
+  const cls = dimmed ? { className: 'opacity-50' } : {}
   if (file.type === 'folder') {
-    return <FolderTile file={file} {...rest} />
+    return <FolderTile file={file} {...cls} {...rest} />
   }
-  return <Thumb file={file} {...rest} />
+  return <Thumb file={file} {...cls} {...rest} />
 }
