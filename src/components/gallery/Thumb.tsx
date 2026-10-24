@@ -16,8 +16,10 @@ interface ThumbProps extends React.HTMLAttributes<HTMLDivElement> {
   height?: number
 }
 
-// 透传 ...rest（含 ContextMenuTrigger asChild 注入的事件处理器与 ref）
-export function Thumb({ file, selected, onSelect, onOpen, width, height, className, ...rest }: ThumbProps) {
+// 透传 ...rest（含 ContextMenuTrigger asChild 注入的事件处理器与 ref）。
+// style 必须显式解构合并：Radix Slot 会注入 style 键（可能为空对象），放在
+// rest 里展开会覆盖下面的定位尺寸，导致瓦片高度塌陷
+export function Thumb({ file, selected, onSelect, onOpen, width, height, className, style, ...rest }: ThumbProps) {
   // GIF（保留动画）/ SVG（无法位图化）直连原文件；其余走缩略图缓存，失败回退原文件
   const thumbable = file.type === 'image' && !DIRECT_EXTS.has(file.ext)
   const thumb = useThumbUrl(thumbable ? file : null)
@@ -39,7 +41,7 @@ export function Thumb({ file, selected, onSelect, onOpen, width, height, classNa
         selected ? 'border-primary ring-2 ring-primary' : 'border-border hover:ring-2 hover:ring-ring',
         className,
       )}
-      style={{ width: width ?? '100%', height: height ?? '100%' }}
+      style={{ width: width ?? '100%', height: height ?? '100%', ...style }}
       {...rest}
     >
       {file.type === 'video' ? (

@@ -68,8 +68,9 @@ function ItemMenu({ file, onOpen, dimmed, children }: {
   )
 }
 
-/** detail 布局单行（模块级组件，保证虚拟滚动行不被重挂载；透传属性供 asChild 挂事件） */
-function DetailRow({ file, selected, dimmed, onSelect, onOpen, className, ...rest }: {
+/** detail 布局单行（模块级组件，保证虚拟滚动行不被重挂载；透传属性供 asChild 挂事件）。
+ *  style 显式解构合并：Radix Slot 注入的 style 键不能覆盖行高 */
+function DetailRow({ file, selected, dimmed, onSelect, onOpen, className, style, ...rest }: {
   file: FileModel
   selected: boolean
   dimmed: boolean
@@ -91,7 +92,7 @@ function DetailRow({ file, selected, dimmed, onSelect, onOpen, className, ...res
         dimmed && 'opacity-50',
         className,
       )}
-      style={{ height: DETAIL_ROW_H }}
+      style={{ height: DETAIL_ROW_H, ...style }}
       {...rest}
     >
       <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">
@@ -369,7 +370,7 @@ export function Gallery() {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={scrollRef} className={cn('h-full overflow-y-auto overscroll-contain', pureBlack && 'bg-black')}>
+        <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden overscroll-contain', pureBlack && 'bg-black')}>
           {layout === 'grid' && (
             <div className="relative" style={{ height: rowVirtualizer.getTotalSize() + PAD * 2 }}>
               {rowVirtualizer.getVirtualItems().map(vr => {
