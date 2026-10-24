@@ -262,51 +262,112 @@ export function Gallery() {
     thumbCache.preload(files.slice(lo, hi + 1))
   }, [visibleRange?.first, visibleRange?.last, files])
 
-  // 右键手势（对标原版 RightMouseGesture）：按住右键拖动触发，无拖动的右键
-  // 由 mouseup 派发合成事件打开应用菜单。区域内的原生菜单始终接管
+  // 右键手势（对标原版 RightMouseGesture）：按住右键拖动触发，带方向罗盘浮层反馈；
+  // 无拖动的右键由 mouseup 派发合成事件打开应用菜单。
+  // 拦截器挂在 document 捕获层（比 Radix 同节点监听更早），并用 zone.contains
+  // 圈定画廊区域——对滚动容器重挂载免疫，原生菜单在区域内始终被接管
   const gestureRef = useRef({ active: false, x: 0, y: 0, fired: false })
   const bypassMenuRef = useRef(false)
+  const overlayRef = useRef<{ hide: () => void } | null>(null)
   useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const THRESHOLD = 24
+    const SHOW_DIST = 10
+    const FIRE_DIST = 28
 
+    // 8 扇区（屏幕坐标 y 向下）：索引 = round(atan2(dy,dx)/45°)
+    const SECTORS: { deg: number; label: string; act: () => void }[] = [
+      { deg: 90, label: '下一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(1) },
+      { deg: 135, label: '', act: () => {} }, // down_right：原版为关闭窗口，浏览态无对应
+      { deg: 180, label: '返回', act: () => useAppStore.getState().goBack() },
+      { deg: 225, label: '', act: () => {} },
+      { deg: 270, label: '上一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(-1) },
+      { deg: 315, label: '上一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(-1) },
+      { deg: 0, label: '上级目录', act: () => useAppStore.getState().goUp() },
+      { deg: 45, label: '下一有图文件夹', act: () => void useAppStore.getState().goSiblingImageDir(1) },
+    ]
+    const sectorOf = (dx: number, dy: number) =>
+      ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8
+
+    // 轨迹浮层（纯 DOM，避免 mousemove 触发 React 重渲染）
+    const ov = document.createElement('div')
+    ov.className = 'fixed z-[90] pointer-events-none flex flex-col items-center gap-1.5'
+    ov.style.display = 'none'
+    ov.innerHTML = `
+      <div class="fv-g-ring flex size-14 items-center justify-center rounded-full border-2 border-border bg-background/90 shadow-lg backdrop-blur-sm text-muted-foreground">
+        <svg class="fv-g-arrow" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 90ms"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+      </div>
+      <div class="fv-g-label rounded bg-foreground/85 px-2 py-0.5 text-xs text-background whitespace-nowrap" style="display:none"></div>`
+    document.body.appendChild(ov)
+    const ring = ov.querySelector('.fv-g-ring') as HTMLElement
+    const arrow = ov.querySelector('.fv-g-arrow') as HTMLElement
+    const labelEl = ov.querySelector('.fv-g-label') as HTMLElement
+    let hideTimer = 0
+    const show = (x: number, y: number, sector: number, fired: boolean) => {
+      const s = SECTORS[sector]
+      ov.style.display = 'flex'
+      ov.style.left = `${x}px`
+      ov.style.top = `${y}px`
+      ov.style.transform = 'translate(-50%, calc(-100% - 20px))'
+      arrow.style.transform = `rotate(${s.deg}deg)`
+      labelEl.style.display = s.label ? '' : 'none'
+      labelEl.textContent = s.label
+      ring.classList.toggle('border-primary', fired)
+      ring.classList.toggle('text-primary', fired)
+      ring.classList.toggle('bg-primary/10', fired)
+    }
+    const hide = () => { ov.style.display = 'none' }
+    const hideSoon = () => {
+      window.clearTimeout(hideTimer)
+      hideTimer = window.setTimeout(hide, 500)
+    }
+    overlayRef.current = { hide }
+
+    const inZone = (target: EventTarget | null): boolean => {
+      const z = scrollRef.current
+      return !!z && target instanceof Node && z.contains(target)
+    }
+
+    // 区域内原生右键菜单一律接管（合成派发时 bypass 放行给 Radix）
     const onCtx = (e: MouseEvent) => {
-      // 合成派发的菜单事件放行（Radix 据此打开并定位）；真实右键一律接管
-      if (bypassMenuRef.current) return
+      if (bypassMenuRef.current || !inZone(e.target)) return
       e.preventDefault()
       e.stopPropagation()
     }
     const onDown = (e: MouseEvent) => {
-      if (e.button !== 2 || useAppStore.getState().viewerId) return
+      if (e.button !== 2 || !inZone(e.target) || useAppStore.getState().viewerId) return
+      e.preventDefault()
       gestureRef.current = { active: true, x: e.clientX, y: e.clientY, fired: false }
     }
     const onMove = (e: MouseEvent) => {
       const g = gestureRef.current
-      if (!g.active || g.fired) return
+      if (!g.active) return
       const dx = e.clientX - g.x
       const dy = e.clientY - g.y
-      if (Math.hypot(dx, dy) < THRESHOLD) return
-      g.fired = true
-      const s = useAppStore.getState()
-      // 8 象限：right(±22.5°) / down_right / down / down_left / left / up_left / up / up_right
-      const deg = (Math.atan2(dy, dx) * 180) / Math.PI
-      if (deg >= -22.5 && deg < 22.5) void s.goSiblingImageDir(1)
-      else if (deg >= 22.5 && deg < 67.5) { /* down_right：原版为关闭窗口，浏览态无对应 */ }
-      else if (deg >= 67.5 && deg < 112.5) s.goBack()
-      else if (deg >= 112.5 && deg < 157.5) { /* down_left：原版未定义 */ }
-      else if (deg >= -157.5 && deg < -112.5) { /* up_left：原版未定义 */ }
-      else if (deg >= -112.5 && deg < -67.5) s.goUp()
-      else if (deg >= -67.5 && deg < -22.5) void s.goSiblingImageDir(1)
-      else void s.goSiblingImageDir(-1)
+      const dist = Math.hypot(dx, dy)
+      if (g.fired || dist < SHOW_DIST) return
+      const sector = sectorOf(dx, dy)
+      if (dist >= FIRE_DIST) {
+        g.fired = true
+        SECTORS[sector].act()
+        show(g.x, g.y, sector, true)
+      } else {
+        show(g.x, g.y, sector, false)
+      }
     }
     const onUp = (e: MouseEvent) => {
       const g = gestureRef.current
+      if (!g.active) return
       gestureRef.current = { active: false, x: 0, y: 0, fired: false }
-      if (!g.active || e.button !== 2 || g.fired) return
+      if (e.button !== 2) return
+      if (g.fired) {
+        hideSoon()
+        return
+      }
+      hide()
       // 无拖动的右键：在指针处合成 contextmenu 打开对应应用菜单
+      if (!inZone(e.target)) return
       const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-file-id]')
-      const target = (hit as HTMLElement | null) ?? el
+      const target = (hit as HTMLElement | null) ?? scrollRef.current
+      if (!target) return
       bypassMenuRef.current = true
       try {
         target.dispatchEvent(new MouseEvent('contextmenu', {
@@ -316,15 +377,17 @@ export function Gallery() {
         bypassMenuRef.current = false
       }
     }
-    el.addEventListener('contextmenu', onCtx, true)
-    el.addEventListener('mousedown', onDown)
+    document.addEventListener('contextmenu', onCtx, true)
+    document.addEventListener('mousedown', onDown, true)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
-      el.removeEventListener('contextmenu', onCtx, true)
-      el.removeEventListener('mousedown', onDown)
+      document.removeEventListener('contextmenu', onCtx, true)
+      document.removeEventListener('mousedown', onDown, true)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      window.clearTimeout(hideTimer)
+      ov.remove()
     }
   }, [])
 

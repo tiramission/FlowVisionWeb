@@ -121,8 +121,8 @@ interface AppStore {
   favorites: FavItem[]
   favoritesLoaded: boolean
   openDirectory: () => Promise<void>
-  /** 导航到目标目录链并扫描，push=true 时写入历史 */
-  navigateTo: (chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
+  /** 导航到目标目录链并扫描，push=true 时写入历史；silent 平滑刷新不闪列表 */
+  navigateTo: (chain: readonly FileSystemDirectoryHandle[], silent?: boolean) => Promise<void>
   /** 按当前设置重新扫描当前目录（不写历史）；silent 不清列表避免闪烁（文件操作后刷新） */
   rescan: (silent?: boolean) => void
   goUp: () => void
@@ -259,7 +259,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       await browse([dir], true)
     },
 
-    navigateTo: async chain => { await browse(chain, true) },
+    navigateTo: async (chain, silent = false) => { await browse(chain, true, silent) },
 
     rescan: (silent = false) => {
       const { dirChain } = get()
@@ -302,7 +302,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       for (let i = start + delta; i >= 0 && i < siblings.length; i += delta) {
         const candidate = siblings[i]
         if (await hasMedia(candidate.handle)) {
-          await get().navigateTo([...parentChain, candidate.handle])
+          // silent：保持画廊挂载，手势确认浮层的淡出不被卸载截断
+          await get().navigateTo([...parentChain, candidate.handle], true)
           return
         }
       }

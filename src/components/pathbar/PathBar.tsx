@@ -58,13 +58,15 @@ export function PathBar() {
   })
 
   // 键盘导航：Alt+←/→ 前进后退，Backspace/W 上级，A/D 上/下一有图文件夹，S/Esc 返回
-  // （对标原版 W/A/S/D 右键手势），大图打开时不响应
+  // （对标原版 W/A/S/D 右键手势），大图或弹出层（菜单/对话框/下拉）打开时不响应，
+  // 否则关闭菜单的 Esc 会连带触发导航
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useAppStore.getState()
       if (s.viewerId || !s.dirChain.length) return
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (document.querySelector('[role="menu"], [role="dialog"], [role="listbox"], [role="alertdialog"]')) return
       if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); s.goBack(); return }
       if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); s.goForward(); return }
       if (e.key === 'Backspace') { e.preventDefault(); s.goUp(); return }
