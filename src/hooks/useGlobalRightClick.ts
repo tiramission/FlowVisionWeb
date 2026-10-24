@@ -1,19 +1,23 @@
 import { useEffect, useRef } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 
+/** 按住右键多久后激活手势模式（出现罗盘）；快速右键（不足此时长松开）= 菜单 */
+const HOLD_TO_ACTIVATE_MS = 350
+
 /**
  * 全应用右键接管（对标原版全窗口手势）：
- * - 右键菜单在任何位置都被接管（豁免输入框保留原生粘贴菜单、
+ * - 原生右键菜单在任何位置都被接管（豁免输入框保留原生粘贴菜单、
  *   豁免对话框/下拉弹层）
- * - 按住右键拖动触发手势（罗盘浮层反馈、56px 外圈触发、Ctrl+Z 撤销）
- * - 无拖动的右键：画廊内合成 contextmenu 打开条目/空白菜单，
- *   画廊外（路径栏/侧边栏/工具栏）打开空白菜单
+ * - 快速右键（按住不足 350ms 松开）= 打开应用菜单，不出现罗盘
+ * - 按住 350ms 激活手势模式：罗盘浮现，拖到外圈（56px）触发动作，
+ *   进度环可视化、Ctrl+Z 可撤销；手势模式中松开不弹菜单
+ * - 设置中可关闭手势（关闭后右键仅弹菜单）
  *
- * 监听器在 App 挂载时注册一次、应用全生命周期有效（此前挂在
- * Gallery 上，未打开文件夹/加载期间存在接管空窗）。
+ * 监听器在 App 挂载时注册一次、应用全生命周期有效。
  */
 export function useGlobalRightClick() {
-  const gestureRef = useRef({ active: false, x: 0, y: 0, fired: false })
+  // armed：已按下且等待 hold 激活；active：手势模式已激活（罗盘可见）
+  const gestureRef = useRef({ armed: false, active: false, x: 0, y: 0, fired: false })
   const bypassMenuRef = useRef(false)
 
   useEffect(() => {
@@ -80,6 +84,8 @@ export function useGlobalRightClick() {
       target instanceof Element && !!target.closest('[role="dialog"], [data-radix-popper-content-wrapper]')
     const galleryRoot = () => document.querySelector('[data-gallery-root]')
 
+    let holdTimer = 0
+
     // 区域内原生右键菜单一律接管（合成派发时 bypass 放行给 Radix）
     const onCtx = (e: MouseEvent) => {
       if (bypassMenuRef.current) return
@@ -90,8 +96,23 @@ export function useGlobalRightClick() {
     const onDown = (e: MouseEvent) => {
       if (e.button !== 2 || editable(e.target) || inPopup(e.target)) return
       e.preventDefault()
-      gestureRef.current = { active: true, x: e.clientX, y: e.clientY, fired: false }
-      show(e.clientX, e.clientY, null, false, 0)
+      const g = gestureRef.current
+      g.armed = true
+      g.active = false
+      g.fired = false
+      g.x = e.clientX
+      g.y = e.clientY
+      // 按住足够时长才激活手势模式（罗盘浮现）；快速松开则走菜单
+      if (useAppStore.getState().settings.gestureEnabled) {
+        window.clearTimeout(holdTimer)
+        holdTimer = window.setTimeout(() => {
+          const cur = gestureRef.current
+          if (cur.armed && !cur.active) {
+            cur.active = true
+            show(cur.x, cur.y, null, false, 0)
+          }
+        }, HOLD_TO_ACTIVATE_MS)
+      }
     }
     const onMove = (e: MouseEvent) => {
       const g = gestureRef.current
@@ -116,17 +137,8 @@ export function useGlobalRightClick() {
         show(g.x, g.y, sector, false, (dist - SHOW_DIST) / (FIRE_DIST - SHOW_DIST))
       }
     }
-    const onUp = (e: MouseEvent) => {
-      const g = gestureRef.current
-      if (!g.active) return
-      gestureRef.current = { active: false, x: 0, y: 0, fired: false }
-      if (e.button !== 2) return
-      if (g.fired) {
-        hideSoon()
-        return
-      }
-      hide()
-      // 无拖动的右键：合成 contextmenu 打开应用菜单（大图内除外）。
+    const openMenu = (e: MouseEvent) => {
+      // 无拖动的快速右键：合成 contextmenu 打开应用菜单（大图内除外）。
       // 命中瓦片 = 条目菜单，否则 = 空白菜单；单一触发器由 ctxMenuTargetId 区分内容
       if (useAppStore.getState().viewerId) return
       if (inPopup(e.target)) return
@@ -143,6 +155,21 @@ export function useGlobalRightClick() {
         bypassMenuRef.current = false
       }
     }
+    const onUp = (e: MouseEvent) => {
+      const g = gestureRef.current
+      if (!g.armed) return
+      window.clearTimeout(holdTimer)
+      gestureRef.current = { armed: false, active: false, x: 0, y: 0, fired: false }
+      if (e.button !== 2) return
+      // 手势模式中松开：触发过则延迟收起，未触发视为取消；均不弹菜单
+      if (g.active) {
+        if (g.fired) hideSoon()
+        else hide()
+        return
+      }
+      // 快速右键：菜单
+      openMenu(e)
+    }
     window.addEventListener('contextmenu', onCtx, true)
     window.addEventListener('mousedown', onDown, true)
     window.addEventListener('mousemove', onMove)
@@ -152,6 +179,7 @@ export function useGlobalRightClick() {
       window.removeEventListener('mousedown', onDown, true)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      window.clearTimeout(holdTimer)
       window.clearTimeout(hideTimer)
       ov.remove()
     }

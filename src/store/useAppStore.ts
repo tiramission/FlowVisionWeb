@@ -20,6 +20,8 @@ export interface Settings {
   defaultLayout: LayoutType
   /** 缩略图大小 */
   columnWidth: number
+  /** 右键手势（按住右键 350ms 激活罗盘后拖动触发），关闭后右键仅弹菜单 */
+  gestureEnabled: boolean
   /** 视频断点续播（对标原版 videoPlayRememberPosition，默认开） */
   rememberVideoPos: boolean
   /** 视频顺序连播（对标原版 videoPlaySequentialPlay） */
@@ -36,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   pureBlack: false,
   defaultLayout: 'waterfall',
   columnWidth: 220,
+  gestureEnabled: true,
   rememberVideoPos: true,
   autoPlayNext: false,
   videoVolume: 1,
