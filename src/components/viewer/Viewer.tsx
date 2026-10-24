@@ -18,15 +18,16 @@ const MAX_SCALE = 32
 const WHEEL_FACTOR = 0.0015
 
 /**
- * 尺寸已知时用显式像素尺寸渲染，交给外层 transform 缩放。
- * 不能依赖自然尺寸布局：Tailwind preflight 的 img { max-width: 100% } 会与
- * 绝对定位 shrink-to-fit 容器 + transform 循环求解，把布局尺寸错误压缩，
- * 导致"适应窗口"显示尺寸不对（过大被裁或过小）
+ * 按显示尺寸布局（自然尺寸×当前缩放）：
+ * 旧实现容器 = 原始自然尺寸 + transform scale 缩小 + will-change 强制合成，
+ * 对上万像素的图会形成超出 GPU 最大纹理（16384px）的巨型合成层，
+ * 超出部分栅格化为黑色。改为元素即显示尺寸、位图由浏览器缩放绘入，
+ * 任何层级/缩放下都不存在巨型合成层；transform 仅保留居中+平移
  */
-function explicitSize(natural: { width: number; height: number }): React.CSSProperties {
+function displaySize(natural: { width: number; height: number }, scale: number): React.CSSProperties {
   return {
-    width: natural.width,
-    height: natural.height,
+    width: natural.width * scale,
+    height: natural.height * scale,
     maxWidth: 'none',
     maxHeight: 'none',
   }
@@ -545,15 +546,14 @@ export function Viewer() {
           </div>
         ) : null}
         <div
-          className={`absolute left-1/2 top-1/2 will-change-transform ${isVideo ? 'hidden' : ''}`}
-          style={{ transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+          className={`absolute left-1/2 top-1/2 ${isVideo ? 'hidden' : ''}`}
+          style={{ transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)` }}
         >
           {file.type !== 'video' && (
             previewable && natural ? (
               // 三层堆叠：缩略图秒开 → 预览 → 缩放超阈值后全图淡入。
-              // 同宽高比，外层 transform 数学对三层一致，替换无缝。
-              // 不依赖全图 URL，首帧不等原图读取
-              <div className="relative" style={explicitSize(natural)}>
+              // 容器为显示尺寸（自然×scale），位图由浏览器绘入，无巨型合成层
+              <div className="relative" style={displaySize(natural, scale)}>
                 {thumb.url && (
                   <img
                     src={thumb.url}
@@ -601,7 +601,7 @@ export function Viewer() {
                 draggable={false}
                 decoding="async"
                 className={natural ? '' : 'max-h-[80dvh] max-w-[90vw] object-contain'}
-                style={natural ? explicitSize(natural) : undefined}
+                style={natural ? displaySize(natural, scale) : undefined}
                 onLoad={e => {
                   const img = e.currentTarget
                   if (img.naturalWidth <= 0) return
