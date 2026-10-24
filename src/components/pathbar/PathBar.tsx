@@ -1,7 +1,11 @@
 import { Fragment, useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUp, ChevronRight, ClipboardPaste, FolderPlus, PanelLeft } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUp, ChevronRight, ClipboardPaste, FolderPlus, PanelLeft, Star, StarOff, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { dirKey } from '@/lib/fs/directory'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/utils'
 
@@ -21,7 +25,21 @@ export function PathBar() {
   const createFolderInCurrent = useAppStore(s => s.createFolderInCurrent)
   const pasteIntoCurrent = useAppStore(s => s.pasteIntoCurrent)
   const moveToDir = useAppStore(s => s.moveToDir)
+  const favorites = useAppStore(s => s.favorites)
+  const favoritesLoaded = useAppStore(s => s.favoritesLoaded)
+  const loadFavorites = useAppStore(s => s.loadFavorites)
+  const toggleFavoriteCurrent = useAppStore(s => s.toggleFavoriteCurrent)
+  const removeFavoriteByKey = useAppStore(s => s.removeFavoriteByKey)
+  const openFavorite = useAppStore(s => s.openFavorite)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+
+  // 收藏夹懒加载（首次挂载时读一次 IDB）
+  useEffect(() => {
+    if (!favoritesLoaded) void loadFavorites()
+  }, [favoritesLoaded, loadFavorites])
+
+  const currentKey = dirChain.length ? dirKey(dirChain) : ''
+  const isFaved = favorites.some(f => f.key === currentKey)
 
   const crumbDrop = (i: number) => ({
     onDragOver: (e: React.DragEvent) => {
@@ -104,6 +122,68 @@ export function PathBar() {
         </TooltipTrigger>
         <TooltipContent>上级目录（W / Backspace）</TooltipContent>
       </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!dirChain.length}
+            onClick={() => void toggleFavoriteCurrent()}
+            aria-label="收藏当前文件夹"
+          >
+            {isFaved ? <Star className="fill-current text-amber-400" /> : <StarOff className="text-muted-foreground" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{isFaved ? '从收藏夹移除' : '收藏当前文件夹'}</TooltipContent>
+      </Tooltip>
+
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="收藏夹">
+                <Star />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>收藏夹</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" className="min-w-52">
+          {favorites.length === 0 && (
+            <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+              还没有收藏，点击星标收藏当前文件夹
+            </div>
+          )}
+          {favorites.map((fav, i) => (
+            <Fragment key={fav.key}>
+              {i > 0 && <DropdownMenuSeparator />}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className={cn(
+                    'min-w-0 flex-1 truncate rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
+                    fav.key === currentKey && 'text-primary',
+                  )}
+                  onClick={() => void openFavorite(fav)}
+                  title={fav.key}
+                >
+                  {fav.name}
+                  <span className="ml-1 text-[10px] text-muted-foreground">{fav.key.split('/').slice(0, -1).join('/')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="mr-1 rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
+                  onClick={() => void removeFavoriteByKey(fav.key)}
+                  aria-label={`删除收藏 ${fav.name}`}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            </Fragment>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <Tooltip>
         <TooltipTrigger asChild>

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
+import { addFavorite, listFavorites, removeFavorite, type FavItem } from '@/lib/favorites'
 import { dirKey, fillImageSizes, hasMedia, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
-import { copyEntry, createDirectory, deleteEntry, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
+import { copyEntry, createDirectory, deleteEntry, ensureReadPermission, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
 import type { FileModel, LayoutType, SortType, ThemeMode } from '@/types'
 
 type Status = 'idle' | 'scanning' | 'ready'
@@ -116,6 +117,9 @@ interface AppStore {
   renameTarget: FileModel | null
   deleteTarget: FileModel | null
   toast: Toast | null
+  /** 收藏夹（对标原版 myFavoritesArray），IDB 持久化 */
+  favorites: FavItem[]
+  favoritesLoaded: boolean
   openDirectory: () => Promise<void>
   /** 导航到目标目录链并扫描，push=true 时写入历史 */
   navigateTo: (chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
@@ -139,6 +143,10 @@ interface AppStore {
   createFolderInCurrent: () => Promise<void>
   /** 拖拽移动条目到目标目录链（目录树/面包屑 drop） */
   moveToDir: (file: FileModel, targetChain: readonly FileSystemDirectoryHandle[]) => Promise<void>
+  loadFavorites: () => Promise<void>
+  toggleFavoriteCurrent: () => Promise<void>
+  removeFavoriteByKey: (key: string) => Promise<void>
+  openFavorite: (item: FavItem) => Promise<void>
   setRenameTarget: (f: FileModel | null) => void
   setDeleteTarget: (f: FileModel | null) => void
   showToast: (text: string, kind?: Toast['kind']) => void
@@ -241,6 +249,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     renameTarget: null,
     deleteTarget: null,
     toast: null,
+    favorites: [],
+    favoritesLoaded: false,
 
     openDirectory: async () => {
       const dir = await pickDirectory()
@@ -333,6 +343,42 @@ export const useAppStore = create<AppStore>((set, get) => {
         toastTimer = null
       }, 2600)
     },
+    loadFavorites: async () => {
+      set({ favorites: await listFavorites(), favoritesLoaded: true })
+    },
+
+    toggleFavoriteCurrent: async () => {
+      const s = get()
+      if (!s.dirChain.length) return
+      const key = dirKey(s.dirChain)
+      if (s.favorites.some(f => f.key === key)) {
+        await removeFavorite(key)
+        await s.loadFavorites()
+        s.showToast('已从收藏夹移除')
+        return
+      }
+      const last = s.dirChain[s.dirChain.length - 1]
+      await addFavorite({ key, name: last.name, chain: [...s.dirChain] })
+      await s.loadFavorites()
+      s.showToast('已加入收藏夹')
+    },
+
+    removeFavoriteByKey: async key => {
+      await removeFavorite(key)
+      await get().loadFavorites()
+      get().showToast('已从收藏夹移除')
+    },
+
+    openFavorite: async item => {
+      // 会话恢复的句柄需要重新授权（此刻处于用户手势中，可弹授权框）
+      const root = item.chain[0]
+      if (!(await ensureReadPermission(root))) {
+        get().showToast('未获得文件夹访问权限', 'error')
+        return
+      }
+      await get().navigateTo(item.chain)
+    },
+
     setRenameTarget: f => set({ renameTarget: f }),
     setDeleteTarget: f => set({ deleteTarget: f }),
 

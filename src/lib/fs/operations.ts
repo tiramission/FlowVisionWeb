@@ -27,6 +27,13 @@ export async function ensureWritePermission(dir: FileSystemDirectoryHandle): Pro
   return await h.requestPermission({ mode: 'readwrite' }) === 'granted'
 }
 
+/** 会话恢复的句柄首次访问前申请读权限（收藏夹跨会话跳转用） */
+export async function ensureReadPermission(dir: FileSystemDirectoryHandle): Promise<boolean> {
+  const h = dir as unknown as PermissionHandle
+  if (await h.queryPermission({ mode: 'read' }) === 'granted') return true
+  return await h.requestPermission({ mode: 'read' }) === 'granted'
+}
+
 async function entryExists(dir: FileSystemDirectoryHandle, name: string): Promise<boolean> {
   try {
     await dir.getFileHandle(name)

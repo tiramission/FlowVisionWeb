@@ -262,6 +262,72 @@ export function Gallery() {
     thumbCache.preload(files.slice(lo, hi + 1))
   }, [visibleRange?.first, visibleRange?.last, files])
 
+  // 右键手势（对标原版 RightMouseGesture）：按住右键拖动触发，无拖动的右键
+  // 由 mouseup 派发合成事件打开应用菜单。区域内的原生菜单始终接管
+  const gestureRef = useRef({ active: false, x: 0, y: 0, fired: false })
+  const bypassMenuRef = useRef(false)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const THRESHOLD = 24
+
+    const onCtx = (e: MouseEvent) => {
+      // 合成派发的菜单事件放行（Radix 据此打开并定位）；真实右键一律接管
+      if (bypassMenuRef.current) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 2 || useAppStore.getState().viewerId) return
+      gestureRef.current = { active: true, x: e.clientX, y: e.clientY, fired: false }
+    }
+    const onMove = (e: MouseEvent) => {
+      const g = gestureRef.current
+      if (!g.active || g.fired) return
+      const dx = e.clientX - g.x
+      const dy = e.clientY - g.y
+      if (Math.hypot(dx, dy) < THRESHOLD) return
+      g.fired = true
+      const s = useAppStore.getState()
+      // 8 象限：right(±22.5°) / down_right / down / down_left / left / up_left / up / up_right
+      const deg = (Math.atan2(dy, dx) * 180) / Math.PI
+      if (deg >= -22.5 && deg < 22.5) void s.goSiblingImageDir(1)
+      else if (deg >= 22.5 && deg < 67.5) { /* down_right：原版为关闭窗口，浏览态无对应 */ }
+      else if (deg >= 67.5 && deg < 112.5) s.goBack()
+      else if (deg >= 112.5 && deg < 157.5) { /* down_left：原版未定义 */ }
+      else if (deg >= -157.5 && deg < -112.5) { /* up_left：原版未定义 */ }
+      else if (deg >= -112.5 && deg < -67.5) s.goUp()
+      else if (deg >= -67.5 && deg < -22.5) void s.goSiblingImageDir(1)
+      else void s.goSiblingImageDir(-1)
+    }
+    const onUp = (e: MouseEvent) => {
+      const g = gestureRef.current
+      gestureRef.current = { active: false, x: 0, y: 0, fired: false }
+      if (!g.active || e.button !== 2 || g.fired) return
+      // 无拖动的右键：在指针处合成 contextmenu 打开对应应用菜单
+      const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-file-id]')
+      const target = (hit as HTMLElement | null) ?? el
+      bypassMenuRef.current = true
+      try {
+        target.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+        }))
+      } finally {
+        bypassMenuRef.current = false
+      }
+    }
+    el.addEventListener('contextmenu', onCtx, true)
+    el.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      el.removeEventListener('contextmenu', onCtx, true)
+      el.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
   // 选中项滚动到可见区域
   useEffect(() => {
     if (!selectedId) return
