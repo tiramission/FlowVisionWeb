@@ -107,7 +107,8 @@ export function SettingsDialog() {
             ))}
           </nav>
 
-          <div className="max-h-[62dvh] overflow-y-auto px-1">
+          {/* 横向锁定：Switch 等组件内部有数 px 隐形溢出，设置面板横向无需滚动 */}
+          <div className="max-h-[62dvh] overflow-y-auto overflow-x-hidden px-1">
             {section === 'appearance' && (
               <div>
                 <Row label="主题">
