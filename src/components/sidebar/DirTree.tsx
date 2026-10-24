@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from 'lucide-react'
 import { dirKey } from '@/lib/fs/directory'
 import { useAppStore } from '@/store/useAppStore'
@@ -14,7 +15,8 @@ interface TreeRow {
   isCurrent: boolean
 }
 
-/** 目录树侧边栏（对标原版 CustomOutlineView + DirTree）：懒加载子目录，点击行导航 */
+/** 目录树侧边栏（对标原版 CustomOutlineView + DirTree）：懒加载子目录，点击行导航，
+ *  支持从画廊拖入条目完成移动 */
 export function DirTree() {
   const rootHandle = useAppStore(s => s.rootHandle)
   const dirChain = useAppStore(s => s.dirChain)
@@ -22,6 +24,17 @@ export function DirTree() {
   const expandedKeys = useAppStore(s => s.expandedKeys)
   const navigateTo = useAppStore(s => s.navigateTo)
   const toggleDir = useAppStore(s => s.toggleDir)
+  const moveToDir = useAppStore(s => s.moveToDir)
+  const files = useAppStore(s => s.files)
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+
+  const dropTo = (row: TreeRow, e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOverKey(null)
+    const relPath = e.dataTransfer.getData('application/x-fv-move')
+    const file = files.find(f => f.relPath === relPath)
+    if (file) void moveToDir(file, row.chain)
+  }
 
   if (!rootHandle) return null
   const currentKey = dirKey(dirChain)
@@ -54,9 +67,17 @@ export function DirTree() {
         <div
           key={row.key}
           onClick={() => void navigateTo(row.chain)}
+          onDragOver={e => {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            setDragOverKey(row.key)
+          }}
+          onDragLeave={() => setDragOverKey(k => (k === row.key ? null : k))}
+          onDrop={e => dropTo(row, e)}
           className={cn(
             'flex h-7 cursor-pointer select-none items-center gap-1 rounded-sm pr-2 text-sm',
             row.isCurrent ? 'bg-accent font-medium text-accent-foreground' : 'hover:bg-accent/50',
+            dragOverKey === row.key && 'ring-2 ring-primary bg-accent/70',
           )}
           style={{ paddingLeft: 4 + row.depth * 14 }}
           title={row.name}

@@ -150,6 +150,14 @@ export async function readSubdirs(dir: FileSystemDirectoryHandle): Promise<Subdi
   return out.sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true, sensitivity: 'base' }))
 }
 
+/** 快速判断目录是否包含媒体文件（枚举到第一个即返回），供上/下一有图文件夹跳转用 */
+export async function hasMedia(dir: FileSystemDirectoryHandle): Promise<boolean> {
+  for await (const handle of (dir as IterableDirectoryHandle).values()) {
+    if (handle.kind === 'file' && FILE_EXTENSIONS.has(extOf(handle.name))) return true
+  }
+  return false
+}
+
 /** 目录链的唯一键：从根到当前目录的名字路径 */
 export function dirKey(chain: readonly FileSystemDirectoryHandle[]): string {
   return chain.map(h => h.name).join('/')

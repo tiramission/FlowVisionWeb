@@ -1,17 +1,18 @@
-import { Fragment, useEffect } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, ArrowUp, ChevronRight, ClipboardPaste, FolderPlus, PanelLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/utils'
 
-/** 路径栏：侧边栏开关、前进/后退/上级、新建文件夹/粘贴、面包屑（对标原版 CustomPathControl） */
+/** 路径栏：侧边栏开关、前进/后退/上级、新建文件夹/粘贴、面包屑（可拖入条目移动，对标原版 CustomPathControl） */
 export function PathBar() {
   const dirChain = useAppStore(s => s.dirChain)
   const historyChains = useAppStore(s => s.historyChains)
   const historyIndex = useAppStore(s => s.historyIndex)
   const sidebarOpen = useAppStore(s => s.sidebarOpen)
   const clipboard = useAppStore(s => s.clipboard)
+  const files = useAppStore(s => s.files)
   const navigateTo = useAppStore(s => s.navigateTo)
   const goUp = useAppStore(s => s.goUp)
   const goBack = useAppStore(s => s.goBack)
@@ -19,8 +20,27 @@ export function PathBar() {
   const toggleSidebar = useAppStore(s => s.toggleSidebar)
   const createFolderInCurrent = useAppStore(s => s.createFolderInCurrent)
   const pasteIntoCurrent = useAppStore(s => s.pasteIntoCurrent)
+  const moveToDir = useAppStore(s => s.moveToDir)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
 
-  // 键盘导航：Alt+←/→ 前进后退，Backspace/W 上级，S/Esc 返回（对标原版 W/S 手势），大图打开时不响应
+  const crumbDrop = (i: number) => ({
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      setDragOverIdx(i)
+    },
+    onDragLeave: () => setDragOverIdx(n => (n === i ? null : n)),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      setDragOverIdx(null)
+      const relPath = e.dataTransfer.getData('application/x-fv-move')
+      const file = files.find(f => f.relPath === relPath)
+      if (file) void moveToDir(file, dirChain.slice(0, i + 1))
+    },
+  })
+
+  // 键盘导航：Alt+←/→ 前进后退，Backspace/W 上级，A/D 上/下一有图文件夹，S/Esc 返回
+  // （对标原版 W/A/S/D 右键手势），大图打开时不响应
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useAppStore.getState()
@@ -32,7 +52,9 @@ export function PathBar() {
       if (e.key === 'Backspace') { e.preventDefault(); s.goUp(); return }
       if (e.key === 'Escape') { s.goBack(); return }
       if (e.key === 'w' || e.key === 'W') { s.goUp(); return }
-      if (e.key === 's' || e.key === 'S') { s.goBack() }
+      if (e.key === 's' || e.key === 'S') { s.goBack(); return }
+      if (e.key === 'a' || e.key === 'A') { void s.goSiblingImageDir(-1); return }
+      if (e.key === 'd' || e.key === 'D') { void s.goSiblingImageDir(1) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -122,9 +144,11 @@ export function PathBar() {
               <button
                 type="button"
                 onClick={() => void navigateTo(dirChain.slice(0, i + 1))}
+                {...(isLast ? {} : crumbDrop(i))}
                 className={cn(
                   'shrink-0 rounded px-1.5 py-0.5 hover:bg-accent',
                   isLast ? 'font-medium text-foreground' : 'text-muted-foreground',
+                  dragOverIdx === i && 'ring-2 ring-primary bg-accent',
                 )}
               >
                 {handle.name}

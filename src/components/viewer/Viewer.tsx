@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useFileUrl } from '@/hooks/useFileUrl'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
+import { dirKey } from '@/lib/fs/directory'
+import { clearVideoPos, getVideoPos, setVideoPos } from '@/lib/video/position'
 import { useAppStore } from '@/store/useAppStore'
 
 const MIN_SCALE = 0.05
@@ -30,10 +32,26 @@ export function Viewer() {
   const closeViewer = useAppStore(s => s.closeViewer)
   const setViewerId = useAppStore(s => s.setViewerId)
   const files = useSortedFiles()
+  const settings = useAppStore(s => s.settings)
+  const setSetting = useAppStore(s => s.setSetting)
+  const showToast = useAppStore(s => s.showToast)
 
   const index = viewerId ? files.findIndex(f => f.id === viewerId) : -1
   const file = index >= 0 ? files[index] : null
   const url = useFileUrl(file?.handle)
+  const isVideo = file?.type === 'video'
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const posKey = file && file.handle ? `${dirKey(useAppStore.getState().dirChain)}/${file.relPath}:${file.size}` : ''
+
+  // 视频倍速档位（对标原版 videoPlaybackRate），[ ] 或 </> 键调节
+  const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
+  const stepRate = (delta: number) => {
+    const cur = settings.videoPlaybackRate
+    const i = RATES.findIndex(r => r >= cur - 0.01)
+    const next = RATES[Math.min(RATES.length - 1, Math.max(0, (i === -1 ? 2 : i) + delta))]
+    setSetting({ videoPlaybackRate: next })
+    if (videoRef.current) videoRef.current.playbackRate = next
+  }
 
   const containerRef = useRef<HTMLDivElement>(null)
   // 画布区域（不含顶栏/底栏），fit 与缩放锚点都基于它，避免图片被栏遮挡
@@ -85,6 +103,8 @@ export function Viewer() {
     const next = files[index + delta]
     if (next) setViewerId(next.id)
   }
+  // 播放位置节流保存时间戳
+  const lastSaveRef = useRef(0)
 
   // 切换图片时重置
   useEffect(() => {
@@ -92,6 +112,16 @@ export function Viewer() {
   }, [file?.id])
   // 尺寸就绪后适配窗口
   useLayoutEffect(() => { resetView() }, [file?.id, natural])
+
+  // 卸载或切走时保存视频播放位置
+  useEffect(() => {
+    return () => {
+      const el = videoRef.current
+      if (el && settings.rememberVideoPos && posKey && el.currentTime > 3 && !el.ended) {
+        setVideoPos(posKey, el.currentTime)
+      }
+    }
+  }, [posKey])
 
   // 窗口尺寸变化时重新适应窗口
   useEffect(() => {
@@ -112,7 +142,7 @@ export function Viewer() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // 键盘：Esc 关闭、←/→ 切换、+/- 缩放、0 适应窗口、1 原始大小
+  // 键盘：Esc 关闭、←/→ 切换、+/- 缩放、0 适应窗口、1 原始大小、</>（Shift+,/.）视频倍速
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { closeViewer(); return }
@@ -122,6 +152,8 @@ export function Viewer() {
       if (e.key === '-') { zoomCenter(1 / 1.25); return }
       if (e.key === '0') { resetView(); return }
       if (e.key === '1' && natural) { setScale(1); setOffset({ x: 0, y: 0 }) }
+      if (e.key === '<' || e.key === ',') { stepRate(-1); return }
+      if (e.key === '>' || e.key === '.') { stepRate(1); return }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -202,6 +234,27 @@ export function Viewer() {
             </TooltipTrigger>
             <TooltipContent>原始大小</TooltipContent>
           </Tooltip>
+          {isVideo && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-white hover:bg-white/10 hover:text-white min-w-11 w-11"
+                  onClick={() => {
+                    const i = RATES.findIndex(r => r >= settings.videoPlaybackRate - 0.01)
+                    const next = RATES[(i + 1) % RATES.length]
+                    setSetting({ videoPlaybackRate: next })
+                    if (videoRef.current) videoRef.current.playbackRate = next
+                  }}
+                  aria-label="切换倍速"
+                >
+                  <span className="text-xs font-medium tabular-nums">{settings.videoPlaybackRate}x</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{'倍速（. / , 键）'}</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" onClick={closeViewer} aria-label="关闭">
@@ -221,6 +274,7 @@ export function Viewer() {
           {file.type === 'video'
             ? url && (
               <video
+                ref={videoRef}
                 src={url}
                 controls
                 autoPlay
@@ -229,6 +283,37 @@ export function Viewer() {
                 onLoadedMetadata={e => {
                   const el = e.currentTarget
                   if (el.videoWidth > 0) setNatural(n => n ?? { width: el.videoWidth, height: el.videoHeight })
+                  // 应用记忆的音量/倍速/播放位置（对标原版记忆设置）
+                  el.volume = Math.min(1, Math.max(0, settings.videoVolume))
+                  el.playbackRate = settings.videoPlaybackRate
+                  if (settings.rememberVideoPos && posKey) {
+                    const saved = getVideoPos(posKey)
+                    if (saved > 0 && el.duration > 0 && saved < el.duration - 5) {
+                      el.currentTime = saved
+                      showToast(`已恢复到 ${Math.floor(saved / 60)}:${String(Math.floor(saved % 60)).padStart(2, '0')}`)
+                    }
+                  }
+                }}
+                onTimeUpdate={e => {
+                  // 节流保存播放位置
+                  const el = e.currentTarget
+                  if (!settings.rememberVideoPos || !posKey) return
+                  const now = Date.now()
+                  if (now - lastSaveRef.current < 3000) return
+                  lastSaveRef.current = now
+                  setVideoPos(posKey, el.currentTime)
+                }}
+                onPause={e => {
+                  if (settings.rememberVideoPos && posKey) setVideoPos(posKey, e.currentTarget.currentTime)
+                }}
+                onEnded={() => {
+                  if (posKey) clearVideoPos(posKey)
+                  // 顺序连播（对标原版 videoPlaySequentialPlay）
+                  if (settings.autoPlayNext && files[index + 1]) setViewerId(files[index + 1].id)
+                }}
+                onVolumeChange={e => {
+                  const v = e.currentTarget.volume
+                  if (v !== settings.videoVolume) setSetting({ videoVolume: v })
                 }}
               />
             )
@@ -280,7 +365,7 @@ export function Viewer() {
 
       <div className="flex h-10 shrink-0 items-center justify-center gap-3 text-[11px] text-white/50">
         <span className="tabular-nums">{index + 1} / {files.length}</span>
-        <span>双击关闭 · 滚轮缩放 · 拖拽平移 · ←/→ 切换 · 0 适应窗口 · 1 原始大小</span>
+        <span>双击关闭 · 滚轮缩放 · 拖拽平移 · ←/→ 切换 · 0 适应窗口 · 1 原始大小{isVideo ? ' · ,/. 倍速' : ''}</span>
       </div>
     </div>
   )

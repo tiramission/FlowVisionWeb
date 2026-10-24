@@ -356,8 +356,18 @@ export function Gallery() {
     </ItemMenu>
   )
 
+  // HTML5 拖拽数据：drop 端（目录树/面包屑）据此找到条目
+  const dragProps = (f: FileModel) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData('application/x-fv-move', f.relPath)
+      e.dataTransfer.effectAllowed = 'move'
+    },
+  })
+
   const tile = (f: FileModel, size?: { width?: number; height?: number }) => (
     <TileOrThumb
+      {...dragProps(f)}
       file={f}
       width={size?.width}
       height={size?.height}
@@ -453,6 +463,7 @@ export function Gallery() {
                     >
                       {withMenu(f, (
                         <DetailRow
+                          {...dragProps(f)}
                           file={f}
                           selected={f.id === selectedId}
                           dimmed={!!cutNames?.has(f.name)}

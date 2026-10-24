@@ -131,6 +131,20 @@ export function SettingsDialog() {
         </Row>
 
         <Separator className="my-2" />
+        <div className="text-xs font-medium text-muted-foreground">视频</div>
+        <Row label="记忆播放位置" hint="重新打开视频时从上次位置继续">
+          <Switch checked={settings.rememberVideoPos} onCheckedChange={v => setSetting({ rememberVideoPos: v })} aria-label="记忆播放位置" />
+        </Row>
+        <Row label="自动连播" hint="视频播完自动切换到下一个文件">
+          <Switch checked={settings.autoPlayNext} onCheckedChange={v => setSetting({ autoPlayNext: v })} aria-label="自动连播" />
+        </Row>
+        <Row label="音量与倍速" hint="音量和倍速自动记忆，下次打开沿用">
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {Math.round(settings.videoVolume * 100)}% · {settings.videoPlaybackRate}x
+          </span>
+        </Row>
+
+        <Separator className="my-2" />
         <div className="text-xs font-medium text-muted-foreground">快捷键</div>
         <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 py-2 text-xs">
           {SHORTCUTS.map(([keys, desc]) => (

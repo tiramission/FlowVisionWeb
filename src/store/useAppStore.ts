@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { dirKey, fillImageSizes, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
+import { dirKey, fillImageSizes, hasMedia, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
 import { copyEntry, createDirectory, deleteEntry, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
 import type { FileModel, LayoutType, SortType, ThemeMode } from '@/types'
 
@@ -19,6 +19,13 @@ export interface Settings {
   defaultLayout: LayoutType
   /** 缩略图大小 */
   columnWidth: number
+  /** 视频断点续播（对标原版 videoPlayRememberPosition，默认开） */
+  rememberVideoPos: boolean
+  /** 视频顺序连播（对标原版 videoPlaySequentialPlay） */
+  autoPlayNext: boolean
+  /** 视频音量与倍速记忆（对标原版 videoVolume / videoPlaybackRate） */
+  videoVolume: number
+  videoPlaybackRate: number
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +35,10 @@ const DEFAULT_SETTINGS: Settings = {
   pureBlack: false,
   defaultLayout: 'waterfall',
   columnWidth: 220,
+  rememberVideoPos: true,
+  autoPlayNext: false,
+  videoVolume: 1,
+  videoPlaybackRate: 1,
 }
 
 function loadSettings(): Settings {
@@ -115,6 +126,8 @@ interface AppStore {
   goForward: () => void
   /** 切换递归模式并立即重扫 */
   toggleRecursive: () => void
+  /** 跳到父目录中上/下一个含有媒体文件的兄弟目录（对标原版 A/D 手势） */
+  goSiblingImageDir: (delta: 1 | -1) => Promise<void>
   setSearchQuery: (q: string) => void
   setSearchRegex: (b: boolean) => void
   setPinyinReady: () => void
@@ -124,6 +137,8 @@ interface AppStore {
   renameInCurrent: (file: FileModel, newName: string) => Promise<void>
   deleteInCurrent: (file: FileModel) => Promise<void>
   createFolderInCurrent: () => Promise<void>
+  /** 拖拽移动条目到目标目录链（目录树/面包屑 drop） */
+  moveToDir: (file: FileModel, targetChain: readonly FileSystemDirectoryHandle[]) => Promise<void>
   setRenameTarget: (f: FileModel | null) => void
   setDeleteTarget: (f: FileModel | null) => void
   showToast: (text: string, kind?: Toast['kind']) => void
@@ -260,6 +275,28 @@ export const useAppStore = create<AppStore>((set, get) => {
       const index = s.historyIndex + 1
       set({ historyIndex: index })
       void browse(s.historyChains[index], false)
+    },
+
+    goSiblingImageDir: async delta => {
+      const s = get()
+      if (s.dirChain.length < 2) {
+        s.showToast('已在根目录，没有同级文件夹')
+        return
+      }
+      const parentChain = s.dirChain.slice(0, -1)
+      const parent = s.dirChain[s.dirChain.length - 2]
+      const siblings = await readSubdirs(parent)
+      const curName = s.dirChain[s.dirChain.length - 1].name
+      const curIdx = siblings.findIndex(e => e.name === curName)
+      const start = curIdx === -1 ? (delta === 1 ? -1 : siblings.length) : curIdx
+      for (let i = start + delta; i >= 0 && i < siblings.length; i += delta) {
+        const candidate = siblings[i]
+        if (await hasMedia(candidate.handle)) {
+          await get().navigateTo([...parentChain, candidate.handle])
+          return
+        }
+      }
+      s.showToast(delta === 1 ? '后面没有包含图片的文件夹了' : '前面没有包含图片的文件夹了')
     },
 
     toggleDir: async (key, chain) => {
@@ -435,6 +472,45 @@ export const useAppStore = create<AppStore>((set, get) => {
       } catch (err) {
         console.error('新建文件夹失败:', err)
         get().showToast('新建文件夹失败', 'error')
+      }
+    },
+
+    moveToDir: async (file, targetChain) => {
+      const s = get()
+      const cur = s.dirChain[s.dirChain.length - 1]
+      const handle = file.handle ?? file.dirHandle
+      const target = targetChain[targetChain.length - 1]
+      if (!cur || !handle || !target) return
+      const targetKey = dirKey(targetChain)
+      // 拖到自身所在目录、或拖文件夹到自己里面，都无意义
+      if (targetKey === dirKey(s.dirChain)) return
+      if (file.type === 'folder' && (dirKey(s.dirChain) + '/').startsWith(targetKey + '/')) {
+        s.showToast('不能把文件夹移动到它自己的子目录', 'error')
+        return
+      }
+      if (!(await ensureWritePermission(target))) {
+        s.showToast('未获得写入权限，移动取消', 'error')
+        return
+      }
+      try {
+        const sourceDir = await resolveParentDir(cur, file.relPath)
+        await moveEntry(handle, sourceDir, target)
+        set(st => {
+          const treeChildren = { ...st.treeChildren }
+          delete treeChildren[dirKey(st.dirChain)]
+          delete treeChildren[targetKey]
+          return {
+            treeChildren,
+            clipboard: null,
+            selectedId: st.selectedId === file.id ? null : st.selectedId,
+            viewerId: st.viewerId === file.id ? null : st.viewerId,
+          }
+        })
+        get().rescan(true)
+        get().showToast(`已移动 ${file.name}`)
+      } catch (err) {
+        console.error('移动失败:', err)
+        get().showToast('移动失败，详见控制台', 'error')
       }
     },
 
