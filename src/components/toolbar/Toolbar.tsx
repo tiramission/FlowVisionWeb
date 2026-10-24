@@ -8,6 +8,7 @@ import { Slider } from '@/components/ui/slider'
 import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
 import { warmupPinyin } from '@/lib/search'
 import { useAppStore } from '@/store/useAppStore'
@@ -48,7 +49,7 @@ export function Toolbar() {
   const scanProgress = useAppStore(s => s.scanProgress)
   const fileCount = useAppStore(s => s.files.length)
   const layout = useAppStore(s => s.layout)
-  const columnWidth = useAppStore(s => s.columnWidth)
+  const columnWidth = useAppStore(s => s.settings.columnWidth)
   const recursive = useAppStore(s => s.recursive)
   const sortType = useAppStore(s => s.sortType)
   const sortAsc = useAppStore(s => s.sortAsc)
@@ -57,7 +58,7 @@ export function Toolbar() {
   const theme = useAppStore(s => s.theme)
   const openDirectory = useAppStore(s => s.openDirectory)
   const setLayout = useAppStore(s => s.setLayout)
-  const setColumnWidth = useAppStore(s => s.setColumnWidth)
+  const setSetting = useAppStore(s => s.setSetting)
   const toggleRecursive = useAppStore(s => s.toggleRecursive)
   const setSortType = useAppStore(s => s.setSortType)
   const toggleSortAsc = useAppStore(s => s.toggleSortAsc)
@@ -226,16 +227,22 @@ export function Toolbar() {
                 max={384}
                 step={8}
                 value={[columnWidth]}
-                onValueChange={vals => setColumnWidth(vals[0] ?? columnWidth)}
+                onValueChange={vals => setSetting({ columnWidth: vals[0] ?? columnWidth })}
               />
             </div>
           </TooltipTrigger>
           <TooltipContent>缩略图大小</TooltipContent>
         </Tooltip>
 
-        <ToolButton tip={theme === 'dark' ? '切换到亮色' : '切换到暗色'} onClick={toggleTheme} aria-label="切换主题">
+        <ToolButton
+          tip={theme === 'dark' ? '切换到亮色' : '切换到暗色'}
+          onClick={toggleTheme}
+          aria-label="切换主题"
+        >
           {theme === 'dark' ? <Sun /> : <Moon />}
         </ToolButton>
+
+        <SettingsDialog />
       </div>
     </header>
   )

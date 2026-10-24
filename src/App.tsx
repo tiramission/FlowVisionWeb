@@ -12,8 +12,6 @@ import { Viewer } from '@/components/viewer/Viewer'
 import { PINYIN_READY_EVENT } from '@/lib/search'
 import { useAppStore } from '@/store/useAppStore'
 
-const THEME_KEY = 'fv-theme'
-
 function MainContent() {
   const status = useAppStore(s => s.status)
   const scanProgress = useAppStore(s => s.scanProgress)
@@ -41,13 +39,26 @@ function App() {
   const sidebarOpen = useAppStore(s => s.sidebarOpen)
   const viewerId = useAppStore(s => s.viewerId)
   const theme = useAppStore(s => s.theme)
+  const settings = useAppStore(s => s.settings)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
-    try {
-      localStorage.setItem(THEME_KEY, theme)
-    } catch { /* 隐私模式下 localStorage 可能不可用 */ }
   }, [theme])
+
+  // 设置持久化（theme 由 themeMode 派生，不单独存）
+  useEffect(() => {
+    try {
+      localStorage.setItem('fv-settings', JSON.stringify(settings))
+    } catch { /* 隐私模式下 localStorage 可能不可用 */ }
+  }, [settings])
+
+  // 跟随系统主题：系统切换时实时响应
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => useAppStore.getState().syncSystemTheme()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
 
   // 拼音字典异步加载完成后触发一次重过滤（拼音匹配从无到有）
   useEffect(() => {

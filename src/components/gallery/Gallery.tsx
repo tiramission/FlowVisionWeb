@@ -16,7 +16,6 @@ import { FolderTile } from './FolderTile'
 import { Thumb } from './Thumb'
 
 const PAD = 10
-const GAP = 8
 const DETAIL_ROW_H = 52
 
 function clipEntryOf(file: FileModel): ClipEntry | null {
@@ -126,7 +125,10 @@ function DetailRow({ file, selected, dimmed, onSelect, onOpen, className, ...res
 export function Gallery() {
   const files = useSortedFiles()
   const layout = useAppStore(s => s.layout)
-  const columnWidth = useAppStore(s => s.columnWidth)
+  const columnWidth = useAppStore(s => s.settings.columnWidth)
+  const gap = useAppStore(s => s.settings.gap)
+  const pureBlack = useAppStore(s => s.settings.pureBlack)
+  const scrollSensitivity = useAppStore(s => s.settings.scrollSensitivity)
   const selectedId = useAppStore(s => s.selectedId)
   const dirChain = useAppStore(s => s.dirChain)
   const totalFiles = useAppStore(s => s.files.length)
@@ -168,27 +170,27 @@ export function Gallery() {
   // 网格：按目标列宽取整；瀑布流：四舍五入；justified/detail 同瀑布流（键盘导航用）
   const cols = width > 0
     ? (layout === 'grid'
-        ? Math.floor((width - 2 * PAD + GAP) / (columnWidth + GAP))
+        ? Math.floor((width - 2 * PAD + gap) / (columnWidth + gap))
         : Math.round(width / columnWidth))
     : 1
-  const colW = width > 0 ? (width - 2 * PAD - GAP * (cols - 1)) / cols : columnWidth
+  const colW = width > 0 ? (width - 2 * PAD - gap * (cols - 1)) / cols : columnWidth
 
   const justRows = useMemo(() => {
     if (layout !== 'justified' || width <= 0) return []
-    return computeJustifiedRows(files.map(f => 1 / aspectOf(f)), width - 2 * PAD, columnWidth, GAP)
+    return computeJustifiedRows(files.map(f => 1 / aspectOf(f)), width - 2 * PAD, columnWidth, gap)
   }, [layout, width, columnWidth, files])
 
   // 网格：按行虚拟化，行高 = 单元格 + 间距
   const rowVirtualizer = useVirtualizer({
     count: layout === 'grid' ? Math.ceil(files.length / cols) : 0,
-    estimateSize: () => columnWidth + GAP,
+    estimateSize: () => columnWidth + gap,
     getScrollElement: () => scrollRef.current,
     overscan: 5,
   })
   // 瀑布流：lanes 模式（masonry），尺寸由宽高比精确估算
   const laneVirtualizer = useVirtualizer({
     count: layout === 'waterfall' ? files.length : 0,
-    estimateSize: i => colW * aspectOf(files[i]) + GAP,
+    estimateSize: i => colW * aspectOf(files[i]) + gap,
     lanes: cols,
     getScrollElement: () => scrollRef.current,
     overscan: 8,
@@ -196,7 +198,7 @@ export function Gallery() {
   // justified：按行虚拟化，行高不均匀
   const justVirtualizer = useVirtualizer({
     count: justRows.length,
-    estimateSize: i => (justRows[i]?.height ?? columnWidth) + GAP,
+    estimateSize: i => (justRows[i]?.height ?? columnWidth) + gap,
     getScrollElement: () => scrollRef.current,
     overscan: 6,
   })
@@ -208,10 +210,25 @@ export function Gallery() {
     overscan: 10,
   })
 
-  useEffect(() => { rowVirtualizer.measure() }, [width, columnWidth, layout, rowVirtualizer])
-  useEffect(() => { laneVirtualizer.measure() }, [files, width, cols, colW, layout, laneVirtualizer])
-  useEffect(() => { justVirtualizer.measure() }, [justRows, justVirtualizer])
+  useEffect(() => { rowVirtualizer.measure() }, [width, columnWidth, layout, gap, rowVirtualizer])
+  useEffect(() => { laneVirtualizer.measure() }, [files, width, cols, colW, layout, gap, laneVirtualizer])
+  useEffect(() => { justVirtualizer.measure() }, [justRows, gap, justVirtualizer])
   useEffect(() => { detailVirtualizer.measure() }, [layout, detailVirtualizer])
+
+  // 滚动灵敏度（对标原版 scrollSensitivity：滑块 1-9 映射 0.25x-4x，5 = 原生）。
+  // 非 1x 时接管滚轮（放弃浏览器平滑滚动换取倍率控制）
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const factor = Math.pow(2, (scrollSensitivity - 5) / 2)
+    if (Math.abs(factor - 1) < 0.01) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      el.scrollBy({ top: e.deltaY * factor })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [scrollSensitivity])
 
   // 滚动方向预加载窗口（对标原版 PRELOAD_THUMB_RANGE_PRE/NEXT）
   const visibleRange = (() => {
@@ -352,7 +369,7 @@ export function Gallery() {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={scrollRef} className="h-full overflow-y-auto overscroll-contain">
+        <div ref={scrollRef} className={cn('h-full overflow-y-auto overscroll-contain', pureBlack && 'bg-black')}>
           {layout === 'grid' && (
             <div className="relative" style={{ height: rowVirtualizer.getTotalSize() + PAD * 2 }}>
               {rowVirtualizer.getVirtualItems().map(vr => {
@@ -361,7 +378,7 @@ export function Gallery() {
                   <div
                     key={vr.key}
                     className="absolute top-0 flex"
-                    style={{ left: PAD, right: PAD, gap: GAP, transform: `translateY(${vr.start + PAD}px)` }}
+                    style={{ left: PAD, right: PAD, gap: gap, transform: `translateY(${vr.start + PAD}px)` }}
                   >
                     {files.slice(start, start + cols).map(f => withMenu(f, tile(f, { width: columnWidth, height: columnWidth })))}
                   </div>
@@ -381,8 +398,8 @@ export function Gallery() {
                     className="absolute left-0 top-0"
                     style={{
                       width: colW,
-                      height: Math.max(1, v.size - GAP),
-                      transform: `translate(${PAD + v.lane * (colW + GAP)}px, ${v.start + PAD}px)`,
+                      height: Math.max(1, v.size - gap),
+                      transform: `translate(${PAD + v.lane * (colW + gap)}px, ${v.start + PAD}px)`,
                     }}
                   >
                     {withMenu(f, tile(f))}
@@ -402,7 +419,7 @@ export function Gallery() {
                   <div
                     key={v.key}
                     className="absolute top-0 flex"
-                    style={{ left: PAD, right: PAD, gap: GAP, height: row.height, transform: `translateY(${v.start + PAD}px)` }}
+                    style={{ left: PAD, right: PAD, gap: gap, height: row.height, transform: `translateY(${v.start + PAD}px)` }}
                   >
                     {rowFiles.map(f => withMenu(f, tile(f, {
                       width: row.height / aspectOf(f),

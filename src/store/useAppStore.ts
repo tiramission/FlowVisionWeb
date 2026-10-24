@@ -5,6 +5,49 @@ import type { FileModel, LayoutType, SortType, ThemeMode } from '@/types'
 
 type Status = 'idle' | 'scanning' | 'ready'
 
+/** 可持久化偏好（对标原版各 Settings 页），localStorage 键 fv-settings */
+export interface Settings {
+  /** 主题模式：system 跟随系统 */
+  themeMode: ThemeMode
+  /** 滚动灵敏度 1-9，5 = 1x，公式 2^((s-5)/2)（对标原版） */
+  scrollSensitivity: number
+  /** 缩略图间距 px */
+  gap: number
+  /** 画廊纯黑背景（对标原版 blackBg） */
+  pureBlack: boolean
+  /** 默认布局（应用启动时） */
+  defaultLayout: LayoutType
+  /** 缩略图大小 */
+  columnWidth: number
+}
+
+const DEFAULT_SETTINGS: Settings = {
+  themeMode: 'system',
+  scrollSensitivity: 5,
+  gap: 8,
+  pureBlack: false,
+  defaultLayout: 'waterfall',
+  columnWidth: 220,
+}
+
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem('fv-settings')
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) as Partial<Settings> }
+    // 兼容旧版独立的主题持久化
+    const oldTheme = localStorage.getItem('fv-theme')
+    if (oldTheme === 'light' || oldTheme === 'dark') {
+      return { ...DEFAULT_SETTINGS, themeMode: oldTheme }
+    }
+  } catch { /* 解析失败回退默认 */ }
+  return DEFAULT_SETTINGS
+}
+
+function resolveTheme(mode: ThemeMode): 'light' | 'dark' {
+  if (mode !== 'system') return mode
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 export interface ClipEntry {
   name: string
   handle: FileSystemFileHandle | FileSystemDirectoryHandle
@@ -23,15 +66,7 @@ export interface Toast {
   kind: 'info' | 'error'
 }
 
-const THEME_KEY = 'fv-theme'
-
-function initTheme(): ThemeMode {
-  try {
-    const saved = localStorage.getItem(THEME_KEY)
-    if (saved === 'light' || saved === 'dark') return saved
-  } catch { /* localStorage 不可用时回退系统偏好 */ }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
+const initialSettings = loadSettings()
 
 interface AppStore {
   status: Status
@@ -50,7 +85,6 @@ interface AppStore {
   historyIndex: number
   files: FileModel[]
   layout: LayoutType
-  columnWidth: number
   /** 递归子目录模式：扫描当前目录下所有子目录（对标原版 Recursive mode） */
   recursive: boolean
   sortType: SortType
@@ -63,7 +97,9 @@ interface AppStore {
   pinyinReady: boolean
   selectedId: string | null
   viewerId: string | null
-  theme: ThemeMode
+  /** 偏好设置（持久化），theme 为 themeMode 的解析结果 */
+  settings: Settings
+  theme: 'light' | 'dark'
   /** 文件管理：剪贴板 / 对话框目标 / 轻提示（对标原版 isCutMode、cutItemPaths、operationLogs） */
   clipboard: Clipboard | null
   renameTarget: FileModel | null
@@ -95,7 +131,10 @@ interface AppStore {
   toggleDir: (key: string, chain: readonly FileSystemDirectoryHandle[]) => Promise<void>
   toggleSidebar: () => void
   setLayout: (layout: LayoutType) => void
-  setColumnWidth: (w: number) => void
+  /** 更新偏好设置（themeMode 变化时同步解析 theme），由 App 层持久化 */
+  setSetting: (partial: Partial<Settings>) => void
+  /** 系统主题变化时重算（仅 themeMode=system 生效） */
+  syncSystemTheme: () => void
   setSortType: (t: SortType) => void
   toggleSortAsc: () => void
   select: (id: string | null) => void
@@ -171,8 +210,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     historyChains: [],
     historyIndex: -1,
     files: [],
-    layout: 'waterfall',
-    columnWidth: 220,
+    layout: initialSettings.defaultLayout,
     recursive: false,
     sortType: 'name',
     sortAsc: true,
@@ -182,7 +220,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     pinyinReady: false,
     selectedId: null,
     viewerId: null,
-    theme: initTheme(),
+    settings: initialSettings,
+    theme: resolveTheme(initialSettings.themeMode),
     clipboard: null,
     renameTarget: null,
     deleteTarget: null,
@@ -411,7 +450,17 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     setLayout: layout => set({ layout }),
-    setColumnWidth: w => set({ columnWidth: w }),
+
+    setSetting: partial => set(s => ({
+      settings: { ...s.settings, ...partial },
+      theme: partial.themeMode ? resolveTheme(partial.themeMode) : s.theme,
+    })),
+
+    syncSystemTheme: () => set(s => (
+      s.settings.themeMode === 'system' && s.theme !== resolveTheme('system')
+        ? { theme: resolveTheme('system') }
+        : {}
+    )),
     setSortType: t => set({ sortType: t }),
     select: id => set({ selectedId: id }),
     openViewer: id => set({ viewerId: id, selectedId: id }),
@@ -426,6 +475,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       return { files }
     }),
 
-    toggleTheme: () => set(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+    // 工具栏快切：写入显式主题模式（system 模式下点按切到显式值）
+    toggleTheme: () => set(s => {
+      const nextMode = s.theme === 'dark' ? 'light' : 'dark'
+      return { settings: { ...s.settings, themeMode: nextMode }, theme: nextMode }
+    }),
   }
 })

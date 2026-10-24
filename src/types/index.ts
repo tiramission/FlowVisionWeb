@@ -7,7 +7,7 @@ export type LayoutType = 'waterfall' | 'justified' | 'grid' | 'detail'
 
 export type SortType = 'name' | 'size' | 'date' | 'type' | 'random'
 
-export type ThemeMode = 'light' | 'dark'
+export type ThemeMode = 'light' | 'dark' | 'system'
 
 export interface FileModel {
   /** 当前目录内唯一标识（递归模式下为相对路径） */
