@@ -223,6 +223,19 @@ export function SettingsDialog() {
                     <span className="truncate text-xs text-muted-foreground" title={desc}>{desc}</span>
                   </div>
                 ))}
+                {/* 版本信息：点击打开 Releases */}
+                <div className="col-span-2 mt-2 flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
+                  <span>FlowVision Web</span>
+                  <a
+                    href="https://github.com/tiramission/FlowVisionWeb/releases"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded px-1 py-0.5 font-mono tabular-nums hover:bg-accent hover:text-foreground"
+                    title="查看版本发布记录"
+                  >
+                    v{__APP_VERSION__}
+                  </a>
+                </div>
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -8,9 +9,15 @@ import { defineConfig } from 'vite'
 // 本地 dev 不设置（根路径），保证两种环境构建互不干扰
 const base = process.env.DEPLOY_BASE ?? '/'
 
+// 构建期注入版本号（package.json），UI 显示当前版本用
+const appVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
+
 // https://vite.dev/config/
 export default defineConfig({
   base,
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [
     react(),
     tailwindcss(),
