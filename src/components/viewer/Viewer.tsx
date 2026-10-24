@@ -296,6 +296,8 @@ export function Viewer() {
     y: number
     saved: { scale: number; offset: { x: number; y: number } } | null
   }>({ timer: 0, button: -1, x: 0, y: 0, saved: null })
+  // 最近指针位置（长按激活时重置拖拽基线用）
+  const lastPtrRef = useRef({ x: 0, y: 0 })
   const clearHoldTimer = () => window.clearTimeout(holdRef.current.timer)
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button === 0) {
@@ -308,6 +310,7 @@ export function Viewer() {
     if ((e.button === 0 || e.button === 2) && natural && !isVideo) {
       clearHoldTimer()
       holdRef.current = { timer: 0, button: e.button, x: e.clientX, y: e.clientY, saved: null }
+      lastPtrRef.current = { x: e.clientX, y: e.clientY }
       holdRef.current.timer = window.setTimeout(() => {
         const h = holdRef.current
         const el = canvasRef.current
@@ -321,13 +324,17 @@ export function Viewer() {
         const next = h.button === 0 ? 1 : fitScale() // 左键 100% / 右键适应
         const k = next / s
         h.saved = { scale: s, offset: { ...o } }
+        const newOffset = clampOffset(next, { x: px - (px - o.x) * k, y: py - (py - o.y) * k })
         setScale(next)
-        // clamp：右键 fit 自动归零居中；左键 1x 获得边缘限位保护
-        setOffset(clampOffset(next, { x: px - (px - o.x) * k, y: py - (py - o.y) * k }))
+        setOffset(newOffset)
+        // 重置拖拽基线到激活后的视图：否则继续拖动会把旧缩放下的
+        // 基线偏移套到新缩放上，图像相对指针漂移
+        dragRef.current = { x: lastPtrRef.current.x, y: lastPtrRef.current.y, ox: newOffset.x, oy: newOffset.y }
       }, 400)
     }
   }
   const onPointerMove = (e: React.PointerEvent) => {
+    lastPtrRef.current = { x: e.clientX, y: e.clientY }
     const d = dragRef.current
     if (d) setOffset(clampOffset(viewRef.current.scale, { x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y }))
     const h = holdRef.current
@@ -338,9 +345,9 @@ export function Viewer() {
     const h = holdRef.current
     if (h.timer) clearHoldTimer()
     if (h.saved) {
-      // 松开还原长按前的视图
+      // 松开还原长按前的视图（规范化，防止历史偏移产生黑块）
       setScale(h.saved.scale)
-      setOffset(h.saved.offset)
+      setOffset(clampOffset(h.saved.scale, h.saved.offset))
       h.saved = null
     }
   }
