@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { ArrowUpDown, Columns3, FolderOpen, FolderTree, LayoutGrid, List, LoaderCircle, Moon, Regex, Rows3, Search, Sun, X } from 'lucide-react'
+import { ArrowUpDown, Columns3, FolderOpen, FolderTree, Globe, LayoutGrid, List, LoaderCircle, Moon, Regex, Rows3, Search, Sun, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -56,6 +56,8 @@ export function Toolbar() {
   const searchQuery = useAppStore(s => s.searchQuery)
   const searchRegex = useAppStore(s => s.searchRegex)
   const theme = useAppStore(s => s.theme)
+  const source = useAppStore(s => s.source)
+  const setDavDialog = useAppStore(s => s.setDavDialog)
   const openDirectory = useAppStore(s => s.openDirectory)
   const setLayout = useAppStore(s => s.setLayout)
   const setSetting = useAppStore(s => s.setSetting)
@@ -99,6 +101,14 @@ export function Toolbar() {
           ? <LoaderCircle className="animate-spin" />
           : <FolderOpen />}
         打开文件夹
+      </Button>
+      <Button
+        size="sm"
+        variant={source === 'remote' ? 'default' : 'outline'}
+        onClick={() => setDavDialog(true)}
+      >
+        <Globe />
+        WebDAV
       </Button>
       {status === 'scanning' && (
         <span className="text-xs text-muted-foreground">

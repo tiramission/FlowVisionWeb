@@ -3,10 +3,13 @@
 // 恢复的句柄首次使用时需要重新授权（在用户手势中 requestPermission）
 
 export interface FavItem {
-  /** dirKey：从根到目录的名字路径 */
+  /** 目录键：本地 dirKey / 远程 remoteDirKey */
   key: string
   name: string
-  chain: FileSystemDirectoryHandle[]
+  /** 本地收藏：目录句柄链 */
+  chain?: FileSystemDirectoryHandle[]
+  /** 远程收藏 */
+  remote?: { connId: string; segments: string[] }
 }
 
 const DB_NAME = 'flowvision-fav'
@@ -42,7 +45,7 @@ export async function listFavorites(): Promise<FavItem[]> {
     const tx = db.transaction(STORE, 'readonly')
     const req = tx.objectStore(STORE).getAll()
     tx.oncomplete = () => {
-      const items = (req.result as FavItem[]).filter(i => Array.isArray(i.chain) && i.chain.length > 0)
+      const items = (req.result as FavItem[]).filter(i => (i.chain && i.chain.length > 0) || i.remote)
       // 收藏按加入顺序展示（getAll 主键序即写入序）
       resolve(items)
     }

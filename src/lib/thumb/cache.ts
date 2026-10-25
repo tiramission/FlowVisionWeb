@@ -1,4 +1,5 @@
 import type { FileModel } from '@/types'
+import { readFileAsFile } from '@/lib/fs/ref'
 import { idbGetThumb, idbPutThumb } from './idb'
 
 /** 缩略图最长边（覆盖最大列宽 384px × 2x DPR） */
@@ -185,7 +186,7 @@ export class ThumbCache {
         return { url: URL.createObjectURL(cached), bytes: cached.size }
       }
     }
-    const file = await f.handle.getFile()
+    const file = await readFileAsFile(f.handle)
     try {
       const blob = await decodeScaled(file, known, this.cfg.maxSide)
       if (blob === null) {

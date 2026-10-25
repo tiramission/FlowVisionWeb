@@ -1,4 +1,5 @@
 import type { FileModel } from '@/types'
+import { readFileAsFile, readFileHead } from '@/lib/fs/ref'
 import { readImageDimensions } from '@/lib/image/dimensions'
 import { FILE_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from './constants'
 import { runPool } from './pool'
@@ -180,7 +181,10 @@ export async function fillImageSizes(
   await runPool(images, 8, async m => {
     if (isCancelled() || !m.handle) return
     try {
-      const size = await readImageDimensions(await m.handle.getFile())
+      // 先取头部（远程走 Range 避免为读宽高拉全图），失败再回退完整读取
+      const head = await readFileHead(m.handle)
+      const blob = head ?? await readFileAsFile(m.handle)
+      const size = await readImageDimensions(blob)
       if (size && size.width > 0 && size.height > 0) acc[m.id] = size
     } catch { /* 跳过解析失败的文件 */ }
   }, done => {

@@ -8,6 +8,8 @@ import { Gallery } from '@/components/gallery/Gallery'
 import { PathBar } from '@/components/pathbar/PathBar'
 import { DirTree } from '@/components/sidebar/DirTree'
 import { Toolbar } from '@/components/toolbar/Toolbar'
+import { ConnectionDialog } from '@/components/webdav/ConnectionDialog'
+import { RemotePanel } from '@/components/webdav/RemotePanel'
 import { Viewer } from '@/components/viewer/Viewer'
 import { PINYIN_READY_EVENT } from '@/lib/search'
 import { VIDEO_EXTENSIONS } from '@/lib/fs/constants'
@@ -80,6 +82,7 @@ function MainContent() {
 
 function App() {
   const status = useAppStore(s => s.status)
+  const source = useAppStore(s => s.source)
   const sidebarOpen = useAppStore(s => s.sidebarOpen)
   const viewerId = useAppStore(s => s.viewerId)
   const theme = useAppStore(s => s.theme)
@@ -131,7 +134,7 @@ function App() {
           {hasRoot && sidebarOpen ? (
             <ResizablePanelGroup orientation="horizontal" className="h-full">
               <ResizablePanel defaultSize="20%" minSize="12%" maxSize="40%" className="min-w-0">
-                <DirTree />
+                {source === 'remote' ? <RemotePanel /> : <DirTree />}
               </ResizablePanel>
               <ResizableHandle withHandle />
               <ResizablePanel className="min-w-0">
@@ -148,6 +151,7 @@ function App() {
         </div>
         {viewerId && <Viewer />}
         <ActionDialogs />
+        <ConnectionDialog />
         <PwaControls />
         <RestoreBanner />
       </div>

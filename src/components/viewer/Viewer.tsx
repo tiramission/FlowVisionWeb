@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useFileUrl } from '@/hooks/useFileUrl'
 import { usePreviewUrl, useThumbUrl } from '@/hooks/useThumbUrl'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
-import { dirKey } from '@/lib/fs/directory'
+import { currentDirKey } from '@/store/useAppStore'
 import { DIRECT_EXTS, PREVIEW_MAX_SIDE, previewCache } from '@/lib/thumb/cache'
 import { clearVideoPos, getVideoPos, setVideoPos } from '@/lib/video/position'
 import { useAppStore } from '@/store/useAppStore'
@@ -47,7 +47,7 @@ export function Viewer() {
   const url = useFileUrl(file?.handle)
   const isVideo = file?.type === 'video'
   const videoRef = useRef<HTMLVideoElement>(null)
-  const posKey = file && file.handle ? `${dirKey(useAppStore.getState().dirChain)}/${file.relPath}:${file.size}` : ''
+  const posKey = file && file.handle ? `${currentDirKey()}/${file.relPath}:${file.size}` : ''
 
   // 视频播放器状态（自定义控制栏，固定尺寸不随视频缩放/全屏变化）
   const [playing, setPlaying] = useState(false)

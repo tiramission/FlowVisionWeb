@@ -6,6 +6,7 @@ import { useFileUrl } from '@/hooks/useFileUrl'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
 import { useThumbUrl } from '@/hooks/useThumbUrl'
 import { dirKey } from '@/lib/fs/directory'
+import { isWebDavRef } from '@/lib/fs/ref'
 import { formatBytes, formatDate } from '@/lib/format'
 import { computeJustifiedRows } from '@/lib/layout/justified'
 import { DIRECT_EXTS, PRELOAD_NEXT, PRELOAD_PRE, thumbCache } from '@/lib/thumb/cache'
@@ -19,18 +20,21 @@ const PAD = 10
 const DETAIL_ROW_H = 52
 
 function clipEntryOf(file: FileModel): ClipEntry | null {
+  // 远程引用不参与本地剪贴板（WebDAV 为只读浏览）
+  if (isWebDavRef(file.handle)) return null
   const handle = file.handle ?? file.dirHandle
   return handle ? { name: file.name, handle } : null
 }
 
-/** 单一右键菜单的内容：命中条目 = 条目操作，空白 = 目录操作 */
-function MenuItems({ file, onOpen }: { file: FileModel | null; onOpen: (f: FileModel) => void }) {
+/** 单一右键菜单的内容：命中条目 = 条目操作，空白 = 目录操作；远程模式只保留浏览项 */
+function MenuItems({ file, onOpen, readOnly }: { file: FileModel | null; onOpen: (f: FileModel) => void; readOnly: boolean }) {
   const copyEntries = useAppStore(s => s.copyEntries)
   const cutEntries = useAppStore(s => s.cutEntries)
   const setRenameTarget = useAppStore(s => s.setRenameTarget)
   const setDeleteTarget = useAppStore(s => s.setDeleteTarget)
 
   if (!file) {
+    if (readOnly) return null
     return (
       <>
         <ContextMenuItem onClick={() => void useAppStore.getState().pasteIntoCurrent()}>
@@ -47,18 +51,22 @@ function MenuItems({ file, onOpen }: { file: FileModel | null; onOpen: (f: FileM
       <ContextMenuItem onClick={() => onOpen(file)}>
         {file.type === 'folder' ? '打开' : '查看大图'}
       </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => { const e = clipEntryOf(file); if (e) copyEntries([e]) }}>
-        复制
-      </ContextMenuItem>
-      <ContextMenuItem onClick={() => { const e = clipEntryOf(file); if (e) cutEntries([e]) }}>
-        剪切
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => setRenameTarget(file)}>重命名…</ContextMenuItem>
-      <ContextMenuItem className="text-destructive" onClick={() => setDeleteTarget(file)}>
-        删除…
-      </ContextMenuItem>
+      {readOnly ? null : (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => { const e = clipEntryOf(file); if (e) copyEntries([e]) }}>
+            复制
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => { const e = clipEntryOf(file); if (e) cutEntries([e]) }}>
+            剪切
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => setRenameTarget(file)}>重命名…</ContextMenuItem>
+          <ContextMenuItem className="text-destructive" onClick={() => setDeleteTarget(file)}>
+            删除…
+          </ContextMenuItem>
+        </>
+      )}
     </>
   )
 }
@@ -127,6 +135,8 @@ export function Gallery() {
   const scrollSensitivity = useAppStore(s => s.settings.scrollSensitivity)
   const selectedId = useAppStore(s => s.selectedId)
   const dirChain = useAppStore(s => s.dirChain)
+  const source = useAppStore(s => s.source)
+  const remoteSegments = useAppStore(s => s.remoteSegments)
   const totalFiles = useAppStore(s => s.files.length)
   const searchQuery = useAppStore(s => s.searchQuery)
   const clipboard = useAppStore(s => s.clipboard)
@@ -167,7 +177,7 @@ export function Gallery() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [dirChain])
+  }, [dirChain, source, remoteSegments])
 
   // 自动滚动播放（对标原版 AutoScrollPlay）：60px/s 匀速滚动，
   // 滚轮/点击等交互立即打断，滚动到底自动停止
@@ -300,13 +310,21 @@ export function Gallery() {
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [selectedId])
 
+  const navigateRemote = useAppStore(s => s.navigateRemote)
+
   const openItem = useCallback((file: FileModel) => {
-    if (file.type === 'folder' && file.dirHandle) {
-      void navigateTo([...dirChain, file.dirHandle])
+    if (file.type === 'folder') {
+      if (file.dirHandle) {
+        void navigateTo([...dirChain, file.dirHandle])
+      } else if (file.remoteDir) {
+        // 远程文件夹：目录名链下钻（面包屑/返回与本地语义一致）
+        const segs = useAppStore.getState().remoteSegments
+        void navigateRemote([...segs, file.name])
+      }
     } else {
       openViewer(file.id)
     }
-  }, [dirChain, navigateTo, openViewer])
+  }, [dirChain, navigateTo, navigateRemote, openViewer])
 
   const moveSelection = useCallback((delta: number) => {
     if (!files.length) return
@@ -315,15 +333,16 @@ export function Gallery() {
     select(files[next].id)
   }, [files, selectedId, select])
 
-  // 键盘：方向键移动选中（感知布局列数）、Enter 打开、文件管理快捷键
+  // 键盘：方向键移动选中（感知布局列数）、Enter 打开、文件管理快捷键（远程只读不响应）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (useAppStore.getState().viewerId) return
       const target = e.target as HTMLElement | null
       const inField = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       const selected = selectedId ? files.find(f => f.id === selectedId) : undefined
+      const readOnly = useAppStore.getState().source !== 'local'
 
-      if ((e.ctrlKey || e.metaKey) && !inField) {
+      if ((e.ctrlKey || e.metaKey) && !inField && !readOnly) {
         if (e.key.toLowerCase() === 'c' && selected) {
           const entry = clipEntryOf(selected)
           if (entry) { e.preventDefault(); copyEntries([entry]) }
@@ -350,6 +369,7 @@ export function Gallery() {
         }
         return
       }
+      if (readOnly) return
       if (e.key === 'F2' && selected) {
         e.preventDefault()
         setRenameTarget(selected)
@@ -390,9 +410,9 @@ export function Gallery() {
     )
   }
 
-  // HTML5 拖拽数据：drop 端（目录树/面包屑）据此找到条目
+  // HTML5 拖拽数据：drop 端（目录树/面包屑）据此找到条目（远程只读不拖拽）
   const dragProps = (f: FileModel) => ({
-    draggable: true,
+    draggable: source === 'local',
     onDragStart: (e: React.DragEvent) => {
       e.dataTransfer.setData('application/x-fv-move', f.relPath)
       e.dataTransfer.effectAllowed = 'move'
@@ -510,7 +530,7 @@ export function Gallery() {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <MenuItems file={ctxMenuFile} onOpen={openItem} />
+        <MenuItems file={ctxMenuFile} onOpen={openItem} readOnly={source !== 'local'} />
       </ContextMenuContent>
     </ContextMenu>
   )

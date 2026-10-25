@@ -9,6 +9,7 @@ export function useSortedFiles() {
   const files = useAppStore(s => s.files)
   const launchFiles = useAppStore(s => s.launchFiles)
   const rootHandle = useAppStore(s => s.rootHandle)
+  const remoteConn = useAppStore(s => s.remoteConn)
   const searchQuery = useAppStore(s => s.searchQuery)
   const searchRegex = useAppStore(s => s.searchRegex)
   const sortType = useAppStore(s => s.sortType)
@@ -16,7 +17,8 @@ export function useSortedFiles() {
   const randomSeed = useAppStore(s => s.randomSeed)
   // 拼音字典异步加载完成后需要重算一次（拼音匹配从无到有）
   const pinyinReady = useAppStore(s => s.pinyinReady)
-  const effective = rootHandle ? files : launchFiles
+  // 本地（rootHandle）或远程（remoteConn）浏览态显示扫描结果，否则是启动文件
+  const effective = rootHandle || remoteConn ? files : launchFiles
   return useMemo(
     () => sortFiles(filterFiles(effective, searchQuery, searchRegex), sortType, sortAsc, randomSeed),
     [effective, searchQuery, searchRegex, sortType, sortAsc, randomSeed, pinyinReady],

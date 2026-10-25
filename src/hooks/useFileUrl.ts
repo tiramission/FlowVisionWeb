@@ -1,29 +1,29 @@
 import { useEffect, useState } from 'react'
+import { refUrl, type FileRef } from '@/lib/fs/ref'
 
-/** 从 FileSystemFileHandle 创建对象 URL，组件卸载/句柄变化时自动 revoke */
-export function useFileUrl(handle: FileSystemFileHandle | null | undefined): string | null {
+/** 从文件引用创建展示 URL（本地 blob / 远程直连或 blob），卸载/引用变化时自动 revoke */
+export function useFileUrl(handle: FileRef | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null)
 
   useEffect(() => {
     setUrl(null)
     if (!handle) return
     let dead = false
-    let created: string | null = null
+    let revoke: (() => void) | null = null
     void (async () => {
       try {
-        const file = await handle.getFile()
-        const objectUrl = URL.createObjectURL(file)
+        const r = await refUrl(handle)
         if (dead) {
-          URL.revokeObjectURL(objectUrl)
+          r.revoke()
         } else {
-          created = objectUrl
-          setUrl(objectUrl)
+          revoke = r.revoke
+          setUrl(r.url)
         }
-      } catch { /* 文件可能已被移动或删除 */ }
+      } catch { /* 文件可能已被移动删除，或网络失败 */ }
     })()
     return () => {
       dead = true
-      if (created) URL.revokeObjectURL(created)
+      revoke?.()
     }
   }, [handle])
 

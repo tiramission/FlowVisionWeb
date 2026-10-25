@@ -11,7 +11,7 @@ export interface ImageSize {
 /** 256KB 足以覆盖绝大多数 JPEG 的 EXIF + SOF 段 */
 const HEAD_LIMIT = 262144
 
-export async function readImageDimensions(file: File): Promise<ImageSize | null> {
+export async function readImageDimensions(file: Blob): Promise<ImageSize | null> {
   const head = await file.slice(0, HEAD_LIMIT).arrayBuffer()
   return parseImageHead(new DataView(head), new Uint8Array(head))
 }

@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { dirKey } from '@/lib/fs/directory'
+import { remoteDirKey, davHrefOf } from '@/lib/webdav/protocol'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/utils'
 
@@ -14,6 +15,11 @@ export function PathBar() {
   const dirChain = useAppStore(s => s.dirChain)
   const historyChains = useAppStore(s => s.historyChains)
   const historyIndex = useAppStore(s => s.historyIndex)
+  const source = useAppStore(s => s.source)
+  const remoteConn = useAppStore(s => s.remoteConn)
+  const remoteSegments = useAppStore(s => s.remoteSegments)
+  const remoteHistory = useAppStore(s => s.remoteHistory)
+  const navigateRemote = useAppStore(s => s.navigateRemote)
   const sidebarOpen = useAppStore(s => s.sidebarOpen)
   const clipboard = useAppStore(s => s.clipboard)
   const files = useAppStore(s => s.files)
@@ -38,7 +44,10 @@ export function PathBar() {
     if (!favoritesLoaded) void loadFavorites()
   }, [favoritesLoaded, loadFavorites])
 
-  const currentKey = dirChain.length ? dirKey(dirChain) : ''
+  const isRemote = source === 'remote'
+  const currentKey = isRemote
+    ? (remoteConn ? remoteDirKey(remoteConn.id, davHrefOf(remoteConn.url, remoteSegments)) : '')
+    : (dirChain.length ? dirKey(dirChain) : '')
   const isFaved = favorites.some(f => f.key === currentKey)
 
   const crumbDrop = (i: number) => ({
@@ -63,7 +72,10 @@ export function PathBar() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useAppStore.getState()
-      if (s.viewerId || !s.dirChain.length) return
+      if (s.viewerId) return
+      // 本地与远程各自的有效浏览态（远程模式下 dirChain 是上次本地的残留）
+      const active = s.source === 'remote' ? !!s.remoteConn : s.dirChain.length > 0
+      if (!active) return
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       // 撤销手势跳转（菜单打开时也允许）
@@ -81,16 +93,19 @@ export function PathBar() {
       if (e.key === 'Escape') { s.goBack(); return }
       if (e.key === 'w' || e.key === 'W') { s.goUp(); return }
       if (e.key === 's' || e.key === 'S') { s.goBack(); return }
-      if (e.key === 'a' || e.key === 'A') { void s.goSiblingImageDir(-1); return }
-      if (e.key === 'd' || e.key === 'D') { void s.goSiblingImageDir(1) }
+      if (s.source !== 'remote') {
+        if (e.key === 'a' || e.key === 'A') { void s.goSiblingImageDir(-1); return }
+        if (e.key === 'd' || e.key === 'D') { void s.goSiblingImageDir(1) }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const activeHistory = isRemote ? remoteHistory : historyChains
   const canBack = historyIndex > 0
-  const canForward = historyIndex >= 0 && historyIndex < historyChains.length - 1
-  const canUp = dirChain.length > 1
+  const canForward = historyIndex >= 0 && historyIndex < activeHistory.length - 1
+  const canUp = isRemote ? remoteSegments.length > 0 : dirChain.length > 1
 
   return (
     <div className="flex h-9 shrink-0 items-center gap-0.5 border-b bg-background px-2">
@@ -138,7 +153,7 @@ export function PathBar() {
           <Button
             variant="ghost"
             size="icon"
-            disabled={!dirChain.length}
+            disabled={!dirChain.length && !isRemote}
             onClick={() => void toggleFavoriteCurrent()}
             aria-label="收藏当前文件夹"
           >
@@ -200,7 +215,7 @@ export function PathBar() {
           <Button
             variant="ghost"
             size="icon"
-            disabled={!clipboard}
+            disabled={!clipboard || isRemote}
             onClick={() => void pasteIntoCurrent()}
             aria-label="粘贴"
           >
@@ -208,44 +223,65 @@ export function PathBar() {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {clipboard
-            ? `粘贴（${clipboard.mode === 'cut' ? '剪切' : '复制'} ${clipboard.entries.length} 项）`
-            : '粘贴（剪贴板为空）'}
+          {isRemote
+            ? 'WebDAV 连接为只读浏览'
+            : clipboard
+              ? `粘贴（${clipboard.mode === 'cut' ? '剪切' : '复制'} ${clipboard.entries.length} 项）`
+              : '粘贴（剪贴板为空）'}
         </TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={() => void createFolderInCurrent()} aria-label="新建文件夹">
+          <Button variant="ghost" size="icon" disabled={isRemote} onClick={() => void createFolderInCurrent()} aria-label="新建文件夹">
             <FolderPlus />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>新建文件夹</TooltipContent>
+        <TooltipContent>{isRemote ? 'WebDAV 连接为只读浏览' : '新建文件夹'}</TooltipContent>
       </Tooltip>
 
       <nav
         className="ml-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto whitespace-nowrap text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         aria-label="路径"
       >
-        {dirChain.map((handle, i) => {
-          const isLast = i === dirChain.length - 1
-          return (
-            <Fragment key={`${i}-${handle.name}`}>
-              {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/60" />}
-              <button
-                type="button"
-                onClick={() => void navigateTo(dirChain.slice(0, i + 1))}
-                {...(isLast ? {} : crumbDrop(i))}
-                className={cn(
-                  'shrink-0 rounded px-1.5 py-0.5 hover:bg-accent',
-                  isLast ? 'font-medium text-foreground' : 'text-muted-foreground',
-                  dragOverIdx === i && 'ring-2 ring-primary bg-accent',
-                )}
-              >
-                {handle.name}
-              </button>
-            </Fragment>
-          )
-        })}
+        {isRemote && remoteConn
+          ? [remoteConn.name, ...remoteSegments].map((name, i) => {
+              const isLast = i === remoteSegments.length
+              return (
+                <Fragment key={`${i}-${name}`}>
+                  {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/60" />}
+                  <button
+                    type="button"
+                    onClick={() => void navigateRemote(remoteSegments.slice(0, i))}
+                    className={cn(
+                      'shrink-0 rounded px-1.5 py-0.5 hover:bg-accent',
+                      isLast ? 'font-medium text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    {name}
+                  </button>
+                </Fragment>
+              )
+            })
+          : dirChain.map((handle, i) => {
+              const isLast = i === dirChain.length - 1
+              return (
+                <Fragment key={`${i}-${handle.name}`}>
+                  {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/60" />}
+                  <button
+                    type="button"
+                    onClick={() => void navigateTo(dirChain.slice(0, i + 1))}
+                    {...(isLast ? {} : crumbDrop(i))}
+                    className={cn(
+                      'shrink-0 rounded px-1.5 py-0.5 hover:bg-accent',
+                      isLast ? 'font-medium text-foreground' : 'text-muted-foreground',
+                      dragOverIdx === i && 'ring-2 ring-primary bg-accent',
+                    )}
+                  >
+                    {handle.name}
+                  </button>
+                </Fragment>
+              )
+            })}
       </nav>
     </div>
   )
