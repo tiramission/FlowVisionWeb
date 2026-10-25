@@ -18,7 +18,7 @@ interface FolderTileProps extends React.HTMLAttributes<HTMLDivElement> {
 // style 必须显式解构合并：Radix Slot 会注入 style 键（可能为空对象），
 // 放在 rest 里展开会覆盖下面的定位尺寸，导致瓦片高度塌陷
 export function FolderTile({ file, selected, onSelect, onOpen, width, height, className, style, ...rest }: FolderTileProps) {
-  const url = useFolderPreviewUrl(file.dirHandle)
+  const url = useFolderPreviewUrl(file.dirHandle, file.remoteDir ?? null)
 
   return (
     <div

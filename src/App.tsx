@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -8,6 +8,8 @@ import { Gallery } from '@/components/gallery/Gallery'
 import { PathBar } from '@/components/pathbar/PathBar'
 import { DirTree } from '@/components/sidebar/DirTree'
 import { Toolbar } from '@/components/toolbar/Toolbar'
+import { ConnectionDialog } from '@/components/webdav/ConnectionDialog'
+import { RemotePanel } from '@/components/webdav/RemotePanel'
 import { Viewer } from '@/components/viewer/Viewer'
 import { PINYIN_READY_EVENT } from '@/lib/search'
 import { VIDEO_EXTENSIONS } from '@/lib/fs/constants'
@@ -78,8 +80,21 @@ function MainContent() {
   return <EmptyState />
 }
 
+/** 桌面/移动断点（768px）：侧边栏形态与工具栏布局的渲染分叉，条件渲染避免双实例 */
+function useIsDesktop(): boolean {
+  const [desktop, setDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    const onChange = () => setDesktop(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return desktop
+}
+
 function App() {
   const status = useAppStore(s => s.status)
+  const source = useAppStore(s => s.source)
   const sidebarOpen = useAppStore(s => s.sidebarOpen)
   const viewerId = useAppStore(s => s.viewerId)
   const theme = useAppStore(s => s.theme)
@@ -121,17 +136,32 @@ function App() {
   }, [])
 
   const hasRoot = status !== 'idle'
+  const isDesktop = useIsDesktop()
+  const sidebarVisible = hasRoot && sidebarOpen
 
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-dvh flex-col bg-background text-foreground">
         <Toolbar />
         {hasRoot && <PathBar />}
-        <div className="min-h-0 flex-1">
-          {hasRoot && sidebarOpen ? (
+        <div className="relative min-h-0 flex-1">
+          {/* 移动端：侧边栏为覆盖式抽屉（点遮罩关闭）；桌面：可拖拽分栏 */}
+          {sidebarVisible && !isDesktop && (
+            <>
+              <div
+                className="fixed inset-0 z-30 bg-black/40"
+                onClick={() => useAppStore.getState().toggleSidebar()}
+                aria-hidden
+              />
+              <div className="fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] border-r bg-background shadow-xl">
+                {source === 'remote' ? <RemotePanel /> : <DirTree />}
+              </div>
+            </>
+          )}
+          {sidebarVisible && isDesktop ? (
             <ResizablePanelGroup orientation="horizontal" className="h-full">
               <ResizablePanel defaultSize="20%" minSize="12%" maxSize="40%" className="min-w-0">
-                <DirTree />
+                {source === 'remote' ? <RemotePanel /> : <DirTree />}
               </ResizablePanel>
               <ResizableHandle withHandle />
               <ResizablePanel className="min-w-0">
@@ -148,6 +178,7 @@ function App() {
         </div>
         {viewerId && <Viewer />}
         <ActionDialogs />
+        <ConnectionDialog />
         <PwaControls />
         <RestoreBanner />
       </div>

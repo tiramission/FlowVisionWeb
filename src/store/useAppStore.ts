@@ -1,11 +1,21 @@
 import { create } from 'zustand'
-import { saveLastSession } from '@/lib/session'
+import { saveLastSession, type LastLocation } from '@/lib/session'
 import { addFavorite, listFavorites, removeFavorite, type FavItem } from '@/lib/favorites'
+import { loadRecents as loadRecentItems, pushRecent, removeRecent, type RecentItem } from '@/lib/recents'
 import { dirKey, fillImageSizes, hasMedia, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
 import { copyEntry, createDirectory, deleteEntry, ensureReadPermission, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
+import { isWebDavRef } from '@/lib/fs/ref'
+import { davReadDirectory } from '@/lib/webdav/browse'
+import {
+  authOf, deleteConnection, getConnection, listConnections, needsPass, putConnection,
+  setSessionPass, type DavConnection,
+} from '@/lib/webdav/connections'
+import { DavError, davHrefOf, davTest, remoteDirKey } from '@/lib/webdav/protocol'
 import type { FileModel, LayoutType, SortType, ThemeMode } from '@/types'
 
 type Status = 'idle' | 'scanning' | 'ready'
+
+type Source = 'local' | 'remote'
 
 /** 可持久化偏好（对标原版各 Settings 页），localStorage 键 fv-settings */
 export interface Settings {
@@ -99,10 +109,32 @@ const initialSettings = loadSettings()
 interface AppStore {
   status: Status
   scanProgress: { done: number; total: number } | null
-  /** 根目录句柄；idle 时为 null */
+  /** 浏览来源：本地 FS API / WebDAV 远程 */
+  source: Source
+  /** 根目录句柄；idle（本地）时为 null；远程模式下保留上次本地状态供断开恢复 */
   rootHandle: FileSystemDirectoryHandle | null
   /** 当前目录链（根在前），File System Access API 没有取父目录的能力，导航靠维护这条链 */
   dirChain: FileSystemDirectoryHandle[]
+  /** 远程浏览：活动连接与目录名链（已解码） */
+  remoteConn: DavConnection | null
+  remoteSegments: string[]
+  /** 远程浏览历史（目录名链数组），与 historyIndex 共用下标 */
+  remoteHistory: string[][]
+  /** WebDAV 连接管理 */
+  davConnections: DavConnection[]
+  davConnectionsLoaded: boolean
+  davDialogOpen: boolean
+  setDavDialog: (open: boolean) => void
+  loadDavConnections: () => Promise<void>
+  saveDavConnection: (conn: DavConnection, sessionPass?: string) => Promise<void>
+  removeDavConnection: (id: string) => Promise<void>
+  /** 连接并进入远程浏览；pass 用于会话内密码（不落盘）。失败返回 false 并 toast 诊断 */
+  connectDav: (connId: string, pass?: string) => Promise<boolean>
+  disconnectDav: () => void
+  /** 远程导航到目录名链并扫描 */
+  navigateRemote: (segments: readonly string[], push?: boolean, silent?: boolean) => Promise<void>
+  /** 待恢复的远程位置（凭据缺失时挂横幅，点击重新连接） */
+  davRestore: { connId: string; segments: string[] } | null
   /** 目录树子节点缓存（懒加载），键为 dirKey */
   treeChildren: Record<string, SubdirEntry[]>
   /** 展开的目录键 */
@@ -136,8 +168,16 @@ interface AppStore {
   /** 收藏夹（对标原版 myFavoritesArray），IDB 持久化 */
   favorites: FavItem[]
   favoritesLoaded: boolean
-  /** 上次会话恢复：待授权的目录链（显示恢复横幅）与恢复动作 */
-  restorePending: FileSystemDirectoryHandle[] | null
+  /** 最近打开的文件夹（按根去重的最后位置），IDB 持久化 */
+  recents: RecentItem[]
+  recentsLoaded: boolean
+  loadRecents: () => Promise<void>
+  /** 移除一条最近记录（列表 × 按钮用） */
+  removeRecentByKey: (key: string) => Promise<void>
+  /** 跳转到最近记录的目录链（句柄在用户手势中重新授权） */
+  openRecent: (item: RecentItem) => Promise<void>
+  /** 上次会话恢复：待授权/重连的位置（显示恢复横幅）与恢复动作 */
+  restorePending: LastLocation | null
   restoreLastSession: () => Promise<void>
   /** PWA file_handler 启动传入的文件（无目录链，画廊直接展示） */
   launchFiles: FileModel[]
@@ -208,7 +248,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const gen = ++scanGeneration
     const dir = chain[chain.length - 1]
     // 会话持久化（对标原版 openLastFolder）：导航即记录，重开恢复
-    void saveLastSession(chain)
+    void saveLastSession({ kind: 'local', chain: [...chain] })
     set(s => {
       const truncated = push ? s.historyChains.slice(0, s.historyIndex + 1) : s.historyChains
       const historyChains = push ? [...truncated, [...chain]] : s.historyChains
@@ -229,6 +269,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         historyIndex: push ? truncated.length : s.historyIndex,
       }
     })
+    // 最近打开记录：每次本地导航更新该根的最后位置（fire-and-forget，不阻塞扫描）
+    void pushRecent(chain, dirKey(chain)).then(items => set({ recents: items }))
     try {
       const models = await readDirectory(dir, {
         recursive: get().recursive,
@@ -253,11 +295,64 @@ export const useAppStore = create<AppStore>((set, get) => {
     }
   }
 
+  /** 远程版 browse：语义与本地 browse 对齐（历史/静默刷新/尺寸回填共用一套状态域） */
+  const browseRemote = async (segments: readonly string[], push: boolean, silent = false) => {
+    const conn = get().remoteConn
+    if (!conn) return
+    const gen = ++scanGeneration
+    const href = davHrefOf(conn.url, segments)
+    void saveLastSession({ kind: 'remote', connId: conn.id, segments: [...segments], name: conn.name })
+    set(s => {
+      const truncated = push ? s.remoteHistory.slice(0, s.historyIndex + 1) : s.remoteHistory
+      return {
+        status: silent ? s.status : 'scanning',
+        files: silent ? s.files : [],
+        scanProgress: null,
+        selectedId: silent ? s.selectedId : null,
+        viewerId: s.viewerId,
+        remoteSegments: [...segments],
+        remoteHistory: push ? [...truncated, [...segments]] : s.remoteHistory,
+        historyIndex: push ? truncated.length : s.historyIndex,
+      }
+    })
+    try {
+      const models = await davReadDirectory(href, conn.id, authOf(conn), {
+        recursive: get().recursive,
+        onProgress: (done, total) => {
+          if (scanGeneration === gen) set({ scanProgress: { done, total } })
+        },
+      })
+      if (scanGeneration !== gen) return
+      set({ files: models, status: 'ready', scanProgress: null })
+      await fillImageSizes(
+        models,
+        () => scanGeneration !== gen,
+        patch => {
+          if (scanGeneration !== gen) return
+          set(s => ({ files: s.files.map(f => (patch[f.id] ? { ...f, ...patch[f.id] } : f)) }))
+        },
+      )
+    } catch (err) {
+      console.error('WebDAV 读取失败:', err)
+      if (scanGeneration !== gen) return
+      set({ status: 'ready', files: [], scanProgress: null })
+      get().showToast(err instanceof DavError ? err.message : 'WebDAV 连接失败', 'error')
+    }
+  }
+
   return {
     status: 'idle',
     scanProgress: null,
+    source: 'local',
     rootHandle: null,
     dirChain: [],
+    remoteConn: null,
+    remoteSegments: [],
+    remoteHistory: [],
+    davConnections: [],
+    davConnectionsLoaded: false,
+    davDialogOpen: false,
+    davRestore: null,
     treeChildren: {},
     expandedKeys: [],
     sidebarOpen: true,
@@ -282,6 +377,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     toast: null,
     favorites: [],
     favoritesLoaded: false,
+    recents: [],
+    recentsLoaded: false,
     launchFiles: [],
     restorePending: null,
     gestureUndoStack: [],
@@ -290,20 +387,43 @@ export const useAppStore = create<AppStore>((set, get) => {
     openDirectory: async () => {
       const dir = await pickDirectory()
       if (!dir) return
-      set({ treeChildren: {}, expandedKeys: [], historyChains: [], historyIndex: -1, sidebarOpen: true, clipboard: null })
+      // 切回本地浏览：丢弃远程会话（连接配置保留，可随时重连）
+      set({
+        source: 'local',
+        remoteConn: null,
+        remoteSegments: [],
+        remoteHistory: [],
+        davRestore: null,
+        treeChildren: {},
+        expandedKeys: [],
+        historyChains: [],
+        historyIndex: -1,
+        sidebarOpen: true,
+        clipboard: null,
+      })
       await browse([dir], true)
     },
 
     navigateTo: async (chain, silent = false) => { await browse(chain, true, silent) },
 
+    navigateRemote: async (segments, push = true, silent = false) => { await browseRemote(segments, push, silent) },
+
     rescan: (silent = false) => {
-      const { dirChain } = get()
-      if (dirChain.length > 0) void browse(dirChain, false, silent)
+      const s = get()
+      if (s.source === 'remote') {
+        if (s.remoteConn) void browseRemote(s.remoteSegments, false, silent)
+        return
+      }
+      if (s.dirChain.length > 0) void browse(s.dirChain, false, silent)
     },
 
     goUp: () => {
-      const { dirChain } = get()
-      if (dirChain.length > 1) void browse(dirChain.slice(0, -1), true)
+      const s = get()
+      if (s.source === 'remote') {
+        if (s.remoteSegments.length > 0) void browseRemote(s.remoteSegments.slice(0, -1), true)
+        return
+      }
+      if (s.dirChain.length > 1) void browse(s.dirChain.slice(0, -1), true)
     },
 
     goBack: () => {
@@ -311,19 +431,25 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (s.historyIndex <= 0) return
       const index = s.historyIndex - 1
       set({ historyIndex: index })
-      void browse(s.historyChains[index], false)
+      if (s.source === 'remote') void browseRemote(s.remoteHistory[index], false)
+      else void browse(s.historyChains[index], false)
     },
 
     goForward: () => {
       const s = get()
-      if (s.historyIndex >= s.historyChains.length - 1) return
+      if (s.historyIndex >= (s.source === 'remote' ? s.remoteHistory : s.historyChains).length - 1) return
       const index = s.historyIndex + 1
       set({ historyIndex: index })
-      void browse(s.historyChains[index], false)
+      if (s.source === 'remote') void browseRemote(s.remoteHistory[index], false)
+      else void browse(s.historyChains[index], false)
     },
 
     goSiblingImageDir: async delta => {
       const s = get()
+      if (s.source === 'remote') {
+        s.showToast('远程模式暂不支持该手势')
+        return
+      }
       if (s.dirChain.length < 2) {
         s.showToast('已在根目录，没有同级文件夹')
         return
@@ -367,6 +493,67 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
+    setDavDialog: open => set({ davDialogOpen: open }),
+
+    loadDavConnections: async () => {
+      set({ davConnections: await listConnections(), davConnectionsLoaded: true })
+    },
+
+    saveDavConnection: async (conn, sessionPass) => {
+      if (sessionPass) setSessionPass(conn.id, sessionPass)
+      await putConnection(conn)
+      await get().loadDavConnections()
+    },
+
+    removeDavConnection: async id => {
+      await deleteConnection(id)
+      const s = get()
+      if (s.remoteConn?.id === id) {
+        // 删除正在浏览的连接：断开远程，有本地状态则回本地
+        s.disconnectDav()
+      }
+      await get().loadDavConnections()
+      get().showToast('已删除连接')
+    },
+
+    connectDav: async (connId, pass) => {
+      const conn = await getConnection(connId)
+      if (!conn) {
+        get().showToast('连接配置不存在', 'error')
+        return false
+      }
+      if (pass) setSessionPass(connId, pass)
+      const test = await davTest(conn.url, authOf(conn))
+      if (!test.ok) {
+        get().showToast(test.error.message, 'error')
+        return false
+      }
+      // 挂起的远程会话恢复：连上后直达原目录
+      const restore = get().davRestore
+      set({
+        source: 'remote',
+        remoteConn: conn,
+        remoteSegments: [],
+        remoteHistory: [],
+        historyIndex: -1,
+        davDialogOpen: false,
+        davRestore: null,
+        clipboard: null,
+        sidebarOpen: true,
+      })
+      if (restore?.connId === connId) await browseRemote(restore.segments, true)
+      else await browseRemote([], true)
+      return true
+    },
+
+    disconnectDav: () => {
+      const s = get()
+      set({ source: 'local', remoteConn: null, remoteSegments: [], remoteHistory: [], davRestore: null, files: [], scanProgress: null })
+      // 本地目录链还在：静默回到原目录；否则回空状态
+      if (s.dirChain.length > 0) void browse(s.dirChain, false)
+      else set({ status: 'idle', rootHandle: null })
+    },
+
     toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
 
     setSearchQuery: q => set({ searchQuery: q }),
@@ -377,9 +564,25 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     restoreLastSession: async () => {
       const s = get()
-      const chain = s.restorePending
-      if (!chain) return
+      const loc = s.restorePending
+      if (!loc) return
       set({ restorePending: null })
+      if (loc.kind === 'remote') {
+        const conn = await getConnection(loc.connId)
+        if (!conn) {
+          s.showToast('上次浏览的连接配置已不存在', 'error')
+          return
+        }
+        // 凭据缺失（未记住密码）：打开连接对话框输入后自动续接
+        if (needsPass(conn)) {
+          set({ davRestore: { connId: loc.connId, segments: loc.segments }, davDialogOpen: true })
+          return
+        }
+        const ok = await get().connectDav(loc.connId)
+        if (ok) await get().navigateRemote(loc.segments)
+        return
+      }
+      const chain = loc.chain
       const root = chain[0]
       if (!(await ensureReadPermission(root))) {
         s.showToast('未获得文件夹访问权限', 'error')
@@ -398,6 +601,27 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     loadFavorites: async () => {
       set({ favorites: await listFavorites(), favoritesLoaded: true })
+    },
+
+    loadRecents: async () => {
+      set({ recents: await loadRecentItems(), recentsLoaded: true })
+    },
+
+    removeRecentByKey: async key => {
+      set({ recents: await removeRecent(key) })
+    },
+
+    openRecent: async item => {
+      const root = item.chain[0]
+      if (!(await ensureReadPermission(root))) {
+        get().showToast('未获得文件夹访问权限', 'error')
+        return
+      }
+      try {
+        await get().navigateTo(item.chain)
+      } catch {
+        get().showToast('文件夹已不可用（可能被移动或删除）', 'error')
+      }
     },
 
     pushGestureUndo: entry => set(s => ({
@@ -420,6 +644,23 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     toggleFavoriteCurrent: async () => {
       const s = get()
+      if (s.source === 'remote' && s.remoteConn) {
+        const key = remoteDirKey(s.remoteConn.id, davHrefOf(s.remoteConn.url, s.remoteSegments))
+        if (s.favorites.some(f => f.key === key)) {
+          await removeFavorite(key)
+          await s.loadFavorites()
+          s.showToast('已从收藏夹移除')
+          return
+        }
+        await addFavorite({
+          key,
+          name: s.remoteSegments[s.remoteSegments.length - 1] ?? s.remoteConn.name,
+          remote: { connId: s.remoteConn.id, segments: [...s.remoteSegments] },
+        })
+        await s.loadFavorites()
+        s.showToast('已加入收藏夹')
+        return
+      }
       if (!s.dirChain.length) return
       const key = dirKey(s.dirChain)
       if (s.favorites.some(f => f.key === key)) {
@@ -441,20 +682,38 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     openFavorite: async item => {
+      // 远程收藏：连上后直达目录（凭据缺失由连接对话框处理）
+      if (item.remote) {
+        const conn = await getConnection(item.remote.connId)
+        if (!conn) {
+          get().showToast('收藏的连接配置已不存在', 'error')
+          return
+        }
+        if (needsPass(conn)) {
+          set({ davRestore: { connId: item.remote.connId, segments: item.remote.segments }, davDialogOpen: true })
+          return
+        }
+        const ok = await get().connectDav(item.remote.connId)
+        if (ok) await get().navigateRemote(item.remote.segments)
+        return
+      }
       // 会话恢复的句柄需要重新授权（此刻处于用户手势中，可弹授权框）
-      const root = item.chain[0]
+      const chain = item.chain
+      const root = chain?.[0]
+      if (!chain || !root) return
       if (!(await ensureReadPermission(root))) {
         get().showToast('未获得文件夹访问权限', 'error')
         return
       }
-      await get().navigateTo(item.chain)
+      await get().navigateTo(chain)
     },
 
     setRenameTarget: f => set({ renameTarget: f }),
     setDeleteTarget: f => set({ deleteTarget: f }),
 
     copyEntries: entries => {
-      const { dirChain } = get()
+      const { dirChain, source } = get()
+      if (source !== 'local') { get().showToast('WebDAV 连接为只读浏览', 'error'); return }
       if (!entries.length || !dirChain.length) return
       set({
         clipboard: {
@@ -468,7 +727,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     cutEntries: entries => {
-      const { dirChain } = get()
+      const { dirChain, source } = get()
+      if (source !== 'local') { get().showToast('WebDAV 连接为只读浏览', 'error'); return }
       if (!entries.length || !dirChain.length) return
       set({
         clipboard: {
@@ -484,6 +744,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     pasteIntoCurrent: async () => {
       const s = get()
       const clip = s.clipboard
+      if (s.source !== 'local') return
       const cur = s.dirChain[s.dirChain.length - 1]
       if (!clip || !cur) return
       if (clip.mode === 'cut' && clip.sourceDirKey === dirKey(s.dirChain)) {
@@ -516,8 +777,10 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     renameInCurrent: async (file, newName) => {
       const s = get()
+      if (s.source !== 'local') { s.showToast('WebDAV 连接为只读浏览', 'error'); return }
       const cur = s.dirChain[s.dirChain.length - 1]
       if (!cur) return
+      if (isWebDavRef(file.handle)) return
       const handle = file.handle ?? file.dirHandle
       if (!handle) return
       try {
@@ -542,6 +805,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     deleteInCurrent: async file => {
       const s = get()
+      if (s.source !== 'local') { s.showToast('WebDAV 连接为只读浏览', 'error'); return }
       const cur = s.dirChain[s.dirChain.length - 1]
       if (!cur) return
       try {
@@ -571,6 +835,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     createFolderInCurrent: async () => {
       const s = get()
+      if (s.source !== 'local') { s.showToast('WebDAV 连接为只读浏览', 'error'); return }
       const cur = s.dirChain[s.dirChain.length - 1]
       if (!cur) return
       try {
@@ -594,7 +859,9 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     moveToDir: async (file, targetChain) => {
       const s = get()
+      if (s.source !== 'local') return
       const cur = s.dirChain[s.dirChain.length - 1]
+      if (isWebDavRef(file.handle)) return
       const handle = file.handle ?? file.dirHandle
       const target = targetChain[targetChain.length - 1]
       if (!cur || !handle || !target) return
@@ -675,3 +942,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     }),
   }
 })
+
+/** 当前目录键（本地 dirKey / 远程 remoteDirKey）：视频记忆位置等跨来源键 */
+export function currentDirKey(): string {
+  const s = useAppStore.getState()
+  if (s.source === 'remote' && s.remoteConn) {
+    return remoteDirKey(s.remoteConn.id, davHrefOf(s.remoteConn.url, s.remoteSegments))
+  }
+  return dirKey(s.dirChain)
+}
