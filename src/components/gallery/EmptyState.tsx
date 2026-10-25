@@ -22,29 +22,27 @@ export function EmptyState() {
     <div className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto p-8">
       <FolderOpen className="size-14 shrink-0 text-muted-foreground/50" strokeWidth={1.2} />
       <div className="text-center">
-        <p className="text-lg font-medium">打开一个文件夹开始浏览</p>
+        <p className="text-lg font-medium">{supported ? '打开一个文件夹开始浏览' : '连接 WebDAV 开始浏览'}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          支持 JPG / PNG / GIF / WebP / AVIF / SVG 及常见视频格式
+          {supported
+            ? '支持 JPG / PNG / GIF / WebP / AVIF / SVG 及常见视频格式'
+            : '当前浏览器不支持本地文件夹访问，可连接 NAS / Nextcloud / rclone 等远程图片库'}
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">
-        {supported ? (
+        {supported && (
           <Button size="lg" onClick={openDirectory}>
             <FolderOpen />
             选择文件夹
           </Button>
-        ) : (
-          <p className="max-w-md rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-            当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge 打开本页面。
-          </p>
         )}
-        <Button size="lg" variant="outline" onClick={() => setDavDialog(true)}>
+        <Button size="lg" variant={supported ? 'outline' : 'default'} onClick={() => setDavDialog(true)}>
           <Globe />
           连接 WebDAV
         </Button>
       </div>
 
-      {recents.length > 0 && (
+      {supported && recents.length > 0 && (
         <div className="mt-2 w-full max-w-sm">
           <div className="mb-1.5 flex items-center justify-between px-1 text-xs font-medium text-muted-foreground">
             <span className="flex items-center gap-1"><Clock className="size-3" />最近打开</span>

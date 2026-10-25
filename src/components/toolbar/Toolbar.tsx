@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { useSortedFiles } from '@/hooks/useSortedFiles'
+import { isFsApiSupported } from '@/lib/fs/directory'
 import { warmupPinyin } from '@/lib/search'
 import { useAppStore } from '@/store/useAppStore'
 import type { LayoutType, SortType } from '@/types'
@@ -108,48 +109,51 @@ export function Toolbar() {
     // 标题栏区偏移；整条可拖拽窗口，右侧避让系统窗控按钮。
     // 移动端：按钮收为图标、次要控件收进「显示选项」下拉
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3 max-md:gap-1 max-md:px-2">
-      {/* 打开文件夹 + 最近打开下拉（组合按钮，语义同 WebDAV 连接列表） */}
-      <div className="flex">
-        <Button size="sm" variant="outline" onClick={openDirectory} disabled={status === 'scanning'} aria-label="打开文件夹" title="打开文件夹" className="rounded-r-none">
-          {status === 'scanning'
-            ? <LoaderCircle className="animate-spin" />
-            : <FolderOpen />}
-          <span className="hidden sm:inline">打开文件夹</span>
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="rounded-l-none border-l-0 px-1.5" aria-label="最近打开的文件夹" title="最近打开的文件夹" disabled={recents.length === 0}>
-              <ChevronDown className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-60">
-            <DropdownMenuLabel>最近打开</DropdownMenuLabel>
-            {recents.map(r => (
-              <div key={r.key} className="flex items-center gap-1 px-1">
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 truncate rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
-                  onClick={() => void openRecent(r)}
-                  title={r.key}
-                >
-                  <span className="font-medium">{r.name}</span>
-                  {r.subName !== r.name && (
-                    <span className="ml-1 text-xs text-muted-foreground">/ {r.subName}</span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="mr-1 rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
-                  onClick={() => void removeRecentByKey(r.key)}
-                  aria-label={`移除记录 ${r.name}`}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </div>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      {/* 打开文件夹 + 最近打开下拉（组合按钮，语义同 WebDAV 连接列表）。
+          无 File System Access API（手机浏览器等）时整体隐藏，WebDAV 是唯一入口 */}
+      {isFsApiSupported() && (
+        <div className="flex">
+          <Button size="sm" variant="outline" onClick={openDirectory} disabled={status === 'scanning'} aria-label="打开文件夹" title="打开文件夹" className="rounded-r-none">
+            {status === 'scanning'
+              ? <LoaderCircle className="animate-spin" />
+              : <FolderOpen />}
+            <span className="hidden sm:inline">打开文件夹</span>
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="rounded-l-none border-l-0 px-1.5" aria-label="最近打开的文件夹" title="最近打开的文件夹" disabled={recents.length === 0}>
+                <ChevronDown className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-60">
+              <DropdownMenuLabel>最近打开</DropdownMenuLabel>
+              {recents.map(r => (
+                <div key={r.key} className="flex items-center gap-1 px-1">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 truncate rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                    onClick={() => void openRecent(r)}
+                    title={r.key}
+                  >
+                    <span className="font-medium">{r.name}</span>
+                    {r.subName !== r.name && (
+                      <span className="ml-1 text-xs text-muted-foreground">/ {r.subName}</span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="mr-1 rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
+                    onClick={() => void removeRecentByKey(r.key)}
+                    aria-label={`移除记录 ${r.name}`}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       <Button
         size="sm"
         variant={source === 'remote' ? 'default' : 'outline'}

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { FolderOpen, Globe } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { isFsApiSupported } from '@/lib/fs/directory'
 import { loadLastSession } from '@/lib/session'
 import { useAppStore } from '@/store/useAppStore'
 
@@ -19,6 +20,8 @@ export function useSessionRestore() {
       const cur = useAppStore.getState()
       if (cur.status !== 'idle') return // 期间用户已打开目录
       if (loc.kind === 'local') {
+        // 无 File System Access API 时本地句柄不可用，无可恢复
+        if (!isFsApiSupported()) return
         const root = loc.chain[0] as unknown as { queryPermission: (d: { mode: 'read' }) => Promise<PermissionState> }
         let state: PermissionState = 'prompt'
         try {
