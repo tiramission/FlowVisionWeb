@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
-  Keyboard, LayoutGrid, MousePointerClick, Palette, PlaySquare, Settings as SettingsIcon,
+  ExternalLink, Images, Info, Keyboard, LayoutGrid, MousePointerClick, Palette, PlaySquare,
+  Settings as SettingsIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -42,13 +43,16 @@ const SHORTCUTS: [string, string][] = [
   ['大图中：滚轮 / 拖拽 / 0 / 1', '缩放 / 平移 / 适应窗口 / 原始大小'],
 ]
 
-type SectionId = 'appearance' | 'browse' | 'interaction' | 'video' | 'shortcuts'
+const REPO_URL = 'https://github.com/tiramission/FlowVisionWeb'
+
+type SectionId = 'appearance' | 'browse' | 'interaction' | 'video' | 'shortcuts' | 'about'
 const SECTIONS: { id: SectionId; label: string; icon: React.ReactNode }[] = [
   { id: 'appearance', label: '外观', icon: <Palette className="size-4" /> },
   { id: 'browse', label: '浏览', icon: <LayoutGrid className="size-4" /> },
   { id: 'interaction', label: '交互', icon: <MousePointerClick className="size-4" /> },
   { id: 'video', label: '视频', icon: <PlaySquare className="size-4" /> },
   { id: 'shortcuts', label: '快捷键', icon: <Keyboard className="size-4" /> },
+  { id: 'about', label: '关于', icon: <Info className="size-4" /> },
 ]
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -227,18 +231,54 @@ export function SettingsDialog() {
                     <span className="truncate text-xs text-muted-foreground" title={desc}>{desc}</span>
                   </div>
                 ))}
-                {/* 版本信息：点击打开 Releases */}
-                <div className="col-span-2 mt-2 flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
-                  <span>FlowVision Web</span>
-                  <a
-                    href="https://github.com/tiramission/FlowVisionWeb/releases"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded px-1 py-0.5 font-mono tabular-nums hover:bg-accent hover:text-foreground"
-                    title="查看版本发布记录"
-                  >
-                    v{__APP_VERSION__}
-                  </a>
+              </div>
+            )}
+
+            {section === 'about' && (
+              <div className="flex flex-col gap-4 py-2 text-sm">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Images className="size-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-heading text-base font-medium">FlowVision Web</div>
+                    <a
+                      href={`${REPO_URL}/releases`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-xs tabular-nums text-muted-foreground hover:text-foreground"
+                      title="查看版本发布记录"
+                    >
+                      v{__APP_VERSION__}
+                    </a>
+                  </div>
+                </div>
+
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  对标 macOS FlowVision 的图片浏览器：本地文件夹（File System Access API）与
+                  WebDAV 远程浏览（NAS / Nextcloud / rclone），瀑布流等四种布局、大图查看、
+                  视频播放与右键手势导航。支持安装为 PWA 离线使用。
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: 'GitHub 仓库', href: REPO_URL },
+                    { label: '问题反馈', href: `${REPO_URL}/issues` },
+                    { label: '版本发布', href: `${REPO_URL}/releases` },
+                  ].map(l => (
+                    <Button key={l.label} variant="outline" size="sm" asChild>
+                      <a href={l.href} target="_blank" rel="noreferrer">
+                        {l.label}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    </Button>
+                  ))}
+                </div>
+
+                <Separator />
+                <div className="text-xs leading-relaxed text-muted-foreground">
+                  <p>React 19 · TypeScript · Vite · Tailwind CSS · shadcn/ui</p>
+                  <p className="mt-1">基于 MIT 许可开源</p>
                 </div>
               </div>
             )}

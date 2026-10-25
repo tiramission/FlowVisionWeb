@@ -153,7 +153,7 @@ Chrome / Edge 访问 [GitHub Pages 线上地址](https://tiramission.github.io/F
 
 ## WebDAV 远程浏览
 
-工具栏「WebDAV」按钮添加连接（NAS / Nextcloud / rclone 等），即可像本地文件夹一样浏览远程图片库（只读）。这也是移动端的推荐用法：手机浏览器无本地文件访问能力，连接 WebDAV 即可把本应用当作 NAS 看图客户端。
+工具栏「WebDAV」按钮添加连接（NAS / Nextcloud / rclone 等），即可像本地文件夹一样浏览远程图片库（只读）。这也是移动端的推荐用法：手机浏览器无本地文件访问能力，连接 WebDAV 即可把本应用当作 NAS 看图客户端。远程模式下侧边栏同样提供目录树（懒加载、自动展开到当前目录），从最近打开/收藏跳回本地文件夹时自动切回本地目录树。
 
 **服务器要求**：必须 HTTPS + 开启 CORS 跨域响应头。
 

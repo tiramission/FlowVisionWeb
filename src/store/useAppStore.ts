@@ -253,6 +253,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       const truncated = push ? s.historyChains.slice(0, s.historyIndex + 1) : s.historyChains
       const historyChains = push ? [...truncated, [...chain]] : s.historyChains
       return {
+        // 本地浏览即本地模式：从远程经最近打开/收藏/会话恢复跳回时收掉远程会话，
+        // 侧栏/路径栏/只读守卫才能一并切回（openDirectory 之外的入口都走这里）
+        source: 'local',
+        remoteConn: null,
+        remoteSegments: [],
+        remoteHistory: [],
+        davRestore: null,
         status: silent ? s.status : 'scanning',
         files: silent ? s.files : [],
         scanProgress: null,
