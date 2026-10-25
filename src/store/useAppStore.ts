@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { saveLastSession, type LastLocation } from '@/lib/session'
 import { addFavorite, listFavorites, removeFavorite, type FavItem } from '@/lib/favorites'
+import { loadRecents as loadRecentItems, pushRecent, removeRecent, type RecentItem } from '@/lib/recents'
 import { dirKey, fillImageSizes, hasMedia, pickDirectory, readDirectory, readSubdirs, type SubdirEntry } from '@/lib/fs/directory'
 import { copyEntry, createDirectory, deleteEntry, ensureReadPermission, ensureWritePermission, moveEntry, renameEntry, resolveParentDir } from '@/lib/fs/operations'
 import { isWebDavRef } from '@/lib/fs/ref'
@@ -167,6 +168,14 @@ interface AppStore {
   /** 收藏夹（对标原版 myFavoritesArray），IDB 持久化 */
   favorites: FavItem[]
   favoritesLoaded: boolean
+  /** 最近打开的文件夹（按根去重的最后位置），IDB 持久化 */
+  recents: RecentItem[]
+  recentsLoaded: boolean
+  loadRecents: () => Promise<void>
+  /** 移除一条最近记录（列表 × 按钮用） */
+  removeRecentByKey: (key: string) => Promise<void>
+  /** 跳转到最近记录的目录链（句柄在用户手势中重新授权） */
+  openRecent: (item: RecentItem) => Promise<void>
   /** 上次会话恢复：待授权/重连的位置（显示恢复横幅）与恢复动作 */
   restorePending: LastLocation | null
   restoreLastSession: () => Promise<void>
@@ -260,6 +269,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         historyIndex: push ? truncated.length : s.historyIndex,
       }
     })
+    // 最近打开记录：每次本地导航更新该根的最后位置（fire-and-forget，不阻塞扫描）
+    void pushRecent(chain, dirKey(chain)).then(items => set({ recents: items }))
     try {
       const models = await readDirectory(dir, {
         recursive: get().recursive,
@@ -366,6 +377,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     toast: null,
     favorites: [],
     favoritesLoaded: false,
+    recents: [],
+    recentsLoaded: false,
     launchFiles: [],
     restorePending: null,
     gestureUndoStack: [],
@@ -588,6 +601,27 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     loadFavorites: async () => {
       set({ favorites: await listFavorites(), favoritesLoaded: true })
+    },
+
+    loadRecents: async () => {
+      set({ recents: await loadRecentItems(), recentsLoaded: true })
+    },
+
+    removeRecentByKey: async key => {
+      set({ recents: await removeRecent(key) })
+    },
+
+    openRecent: async item => {
+      const root = item.chain[0]
+      if (!(await ensureReadPermission(root))) {
+        get().showToast('未获得文件夹访问权限', 'error')
+        return
+      }
+      try {
+        await get().navigateTo(item.chain)
+      } catch {
+        get().showToast('文件夹已不可用（可能被移动或删除）', 'error')
+      }
     },
 
     pushGestureUndo: entry => set(s => ({
