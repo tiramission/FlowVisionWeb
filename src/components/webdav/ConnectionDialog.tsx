@@ -105,7 +105,7 @@ export function ConnectionDialog() {
 
   return (
     <Dialog open={open} onOpenChange={v => setDavDialog(v)}>
-      <DialogContent className="max-h-[85dvh] max-w-lg overflow-y-auto overflow-x-hidden">
+      <DialogContent className="max-h-[85dvh] sm:max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Globe className="size-4 text-primary" />
