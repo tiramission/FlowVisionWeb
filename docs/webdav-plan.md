@@ -18,30 +18,30 @@
 
 ### M1 读取路径收口（~0.5 天）
 
-- [ ] 1.1 FileRef 类型 + 门面函数（本地实现，纯搬家）
-- [ ] 1.2 ThumbCache `decodeScaled` / `useFileUrl` / `fillImageSizes` 切门面
-- [ ] 1.3 桌面 Web 回归（缩略图/大图/视频/会话恢复）
+- [x] 1.1 FileRef 类型 + 门面函数（本地实现，纯搬家）
+- [x] 1.2 ThumbCache `decodeScaled` / `useFileUrl` / `fillImageSizes` 切门面
+- [x] 1.3 桌面 Web 回归（缩略图/大图/视频/会话恢复）
 
 ### M2 WebDAV 协议层（~1 天）
 
-- [ ] 2.1 `client.ts`：PROPFIND / GET / Basic 认证 / 连接测试
-- [ ] 2.2 目录元数据：子目录列举 + hasMedia（兄弟跳转用）+ dirKey 规范化
-- [ ] 2.3 错误分类与中文诊断文案
+- [x] 2.1 `client.ts`：PROPFIND / GET / Basic 认证 / 连接测试
+- [x] 2.2 目录元数据：子目录列举 + hasMedia（兄弟跳转用）+ dirKey 规范化
+- [x] 2.3 错误分类与中文诊断文案
 
 ### M3 远程浏览集成（~1 天）
 
-- [ ] 3.1 store `remote` 域：连接 CRUD + remoteBrowse / navigateToRemote
-- [ ] 3.2 连接管理器对话框（测试按钮 + 诊断展示）+ 侧边栏远程入口
-- [ ] 3.3 会话 / 收藏夹容纳远程位置（存 `{connId, path}`，非句柄）
-- [ ] 3.4 递归模式：远程 BFS（逐层 PROPFIND，深度 4 对齐本地）
+- [x] 3.1 store `remote` 域：连接 CRUD + remoteBrowse / navigateToRemote
+- [x] 3.2 连接管理器对话框（测试按钮 + 诊断展示）+ 侧边栏远程入口
+- [x] 3.3 会话 / 收藏夹容纳远程位置（存 `{connId, path}`，非句柄）
+- [x] 3.4 递归模式：远程 BFS（逐层 PROPFIND，深度 4 对齐本地）
 
 **验收**：Nextcloud + rclone 实测连通浏览；图片全管线（缩略图 / 三层大图 / 上万像素无黑块）；重启恢复远程位置；CORS 失败时诊断可读；本地模式回归全绿。
 
 ### M4 移动端（~1.5-2 天）
 
-- [ ] 4.1 响应式：侧边栏抽屉化、工具栏折叠、连接 UI 移动布局（瀑布流天然自适应，列宽机制现成）
-- [ ] 4.2 触摸交互：大图双指缩放 / 拖拽 / 滑动切换、长按出菜单
-- [ ] 4.3 手机 PWA 实测（Android Chrome / iOS Safari 均为纯远程模式，无 FS API 依赖）
+- [x] 4.1 响应式：侧边栏抽屉化、工具栏折叠、连接 UI 移动布局（瀑布流天然自适应，列宽机制现成）
+- [x] 4.2 触摸交互：大图双指缩放 / 拖拽 / 滑动切换、长按出菜单
+- [x] 4.3 手机视口实测（390×844 模拟：空状态/连接/画廊/抽屉全流程；Android/iOS 真机待日常使用验证）
 
 ## 主要风险
 
