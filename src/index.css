@@ -123,6 +123,9 @@
     }
   body {
     @apply bg-background text-foreground;
+    /* 移动端禁浏览器双击缩放（与查看器手势冲突），保留滚动与捏合；
+       查看器容器单独 touch-none 接管全部触摸 */
+    touch-action: manipulation;
     }
   html {
     @apply font-sans;

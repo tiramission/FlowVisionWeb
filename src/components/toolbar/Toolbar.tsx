@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { ArrowUpDown, Columns3, FolderOpen, FolderTree, Globe, LayoutGrid, List, LoaderCircle, Moon, Regex, Rows3, Search, Sun, X } from 'lucide-react'
+import { ArrowUpDown, Columns3, FolderOpen, FolderTree, Globe, LayoutGrid, List, LoaderCircle, Moon, Regex, Rows3, Search, Settings2, Sun, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
@@ -94,36 +95,39 @@ export function Toolbar() {
 
   return (
     // WCO（沉浸式标题栏）态：仅安装的 PWA 生效。顶栏高 48px 基线 +
-    // 标题栏区偏移；整条可拖拽窗口，右侧避让系统窗控按钮
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
-      <Button size="sm" variant="outline" onClick={openDirectory} disabled={status === 'scanning'}>
+    // 标题栏区偏移；整条可拖拽窗口，右侧避让系统窗控按钮。
+    // 移动端：按钮收为图标、次要控件收进「显示选项」下拉
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3 max-md:gap-1 max-md:px-2">
+      <Button size="sm" variant="outline" onClick={openDirectory} disabled={status === 'scanning'} aria-label="打开文件夹" title="打开文件夹">
         {status === 'scanning'
           ? <LoaderCircle className="animate-spin" />
           : <FolderOpen />}
-        打开文件夹
+        <span className="hidden sm:inline">打开文件夹</span>
       </Button>
       <Button
         size="sm"
         variant={source === 'remote' ? 'default' : 'outline'}
         onClick={() => setDavDialog(true)}
+        aria-label="WebDAV 远程浏览"
+        title="WebDAV 远程浏览"
       >
         <Globe />
-        WebDAV
+        <span className="hidden sm:inline">WebDAV</span>
       </Button>
       {status === 'scanning' && (
-        <span className="text-xs text-muted-foreground">
+        <span className="hidden text-xs text-muted-foreground sm:inline">
           {scanProgress ? `扫描中 ${scanProgress.done}/${scanProgress.total}` : '读取目录…'}
         </span>
       )}
       {status === 'ready' && (
-        <span className="text-xs text-muted-foreground">
+        <span className="hidden text-xs text-muted-foreground sm:inline">
           {searchQuery && visibleFiles.length !== fileCount
             ? `${visibleFiles.length} / ${fileCount} 个文件`
             : `${fileCount} 个文件`}
         </span>
       )}
 
-      <div className="relative ml-1 flex items-center">
+      <div className="relative ml-1 flex min-w-0 flex-1 items-center max-md:ml-0">
         <Search className="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
         <Input
           ref={searchRef}
@@ -144,8 +148,8 @@ export function Toolbar() {
               e.currentTarget.select()
             }
           }}
-          placeholder="搜索（Ctrl+F）"
-          className="h-8 w-44 pl-7 pr-16"
+          placeholder="搜索"
+          className="h-8 w-full min-w-0 pl-7 pr-16 sm:w-44"
           spellCheck={false}
         />
         <div className="absolute right-1 flex items-center gap-0.5">
@@ -162,7 +166,7 @@ export function Toolbar() {
                 <Regex className="size-3.5" />
               </Toggle>
             </TooltipTrigger>
-            <TooltipContent>正则表达式</TooltipContent>
+            <TooltipContent>正则表达式（Ctrl+F 聚焦搜索）</TooltipContent>
           </Tooltip>
           {searchQuery && (
             <button
@@ -177,9 +181,57 @@ export function Toolbar() {
         </div>
       </div>
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex items-center gap-1.5 max-md:ml-0 max-md:gap-0.5">
+        {/* 移动端：排序/布局/缩略图大小/递归收进显示选项下拉 */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="md:hidden" aria-label="显示选项">
+              <Settings2 />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-56">
+            <DropdownMenuLabel>排序</DropdownMenuLabel>
+            {SORT_OPTIONS.map(o => (
+              <DropdownMenuItem key={o.value} onClick={() => setSortType(o.value)}>
+                <span className={cn('mr-2', sortType === o.value ? 'opacity-100' : 'opacity-0')}>•</span>
+                {o.label}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuItem onClick={toggleSortAsc}>
+              <ArrowUpDown className={cn('mr-2 size-4 transition-transform', !sortAsc && 'rotate-180')} />
+              {sortAsc ? '升序' : '降序'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>布局</DropdownMenuLabel>
+            {LAYOUT_OPTIONS.map(o => (
+              <DropdownMenuItem key={o.value} onClick={() => setLayout(o.value)}>
+                <span className={cn('mr-2', layout === o.value ? 'opacity-100' : 'opacity-0')}>•</span>
+                {o.label}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>缩略图大小</DropdownMenuLabel>
+            <div className="flex items-center gap-2 px-2 pb-2">
+              <Slider
+                min={96}
+                max={384}
+                step={8}
+                value={[columnWidth]}
+                onValueChange={vals => setSetting({ columnWidth: vals[0] ?? columnWidth })}
+                aria-label="缩略图大小"
+              />
+              <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{columnWidth}</span>
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => toggleRecursive()} disabled={status === 'idle'}>
+              <FolderTree className="mr-2 size-4" />
+              {recursive ? '关闭递归子目录' : '递归子目录（最深 4 层）'}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <Select value={sortType} onValueChange={v => setSortType(v as SortType)}>
-          <SelectTrigger size="sm" className="w-28">
+          <SelectTrigger size="sm" className="hidden w-28 md:flex">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -192,17 +244,19 @@ export function Toolbar() {
           tip={sortAsc ? '升序（点击切换降序）' : '降序（点击切换升序）'}
           onClick={toggleSortAsc}
           aria-label="切换排序方向"
+          className="hidden md:inline-flex"
         >
           <ArrowUpDown className={cn('transition-transform', !sortAsc && 'rotate-180')} />
         </ToolButton>
 
-        <Separator orientation="vertical" className="mx-1 h-6" />
+        <Separator orientation="vertical" className="mx-1 hidden h-6 md:flex" />
 
         <ToggleGroup
           type="single"
           variant="outline"
           value={layout}
           onValueChange={v => { if (v) setLayout(v as LayoutType) }}
+          className="hidden md:flex"
         >
           {LAYOUT_OPTIONS.map(o => (
             <Tooltip key={o.value}>
@@ -224,6 +278,7 @@ export function Toolbar() {
               onPressedChange={() => toggleRecursive()}
               aria-label="递归子目录"
               disabled={status === 'idle'}
+              className="hidden md:inline-flex"
             >
               <FolderTree />
             </Toggle>
@@ -233,7 +288,7 @@ export function Toolbar() {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex w-28 items-center gap-2 px-1" aria-label="缩略图大小">
+            <div className="hidden w-28 items-center gap-2 px-1 md:flex" aria-label="缩略图大小">
               <Slider
                 min={96}
                 max={384}

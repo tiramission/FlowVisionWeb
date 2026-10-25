@@ -215,6 +215,7 @@ export function PathBar() {
           <Button
             variant="ghost"
             size="icon"
+            className="hidden sm:inline-flex"
             disabled={!clipboard || isRemote}
             onClick={() => void pasteIntoCurrent()}
             aria-label="粘贴"
@@ -232,7 +233,7 @@ export function PathBar() {
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" disabled={isRemote} onClick={() => void createFolderInCurrent()} aria-label="新建文件夹">
+          <Button variant="ghost" size="icon" className="hidden sm:inline-flex" disabled={isRemote} onClick={() => void createFolderInCurrent()} aria-label="新建文件夹">
             <FolderPlus />
           </Button>
         </TooltipTrigger>

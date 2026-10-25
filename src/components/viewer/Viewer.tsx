@@ -288,7 +288,8 @@ export function Viewer() {
 
   // 拖拽平移（仅左键；右键保留给手势）。
   // 长按临时缩放（对标原版）：按住不动 400ms——左键切 100%、右键切适应窗口，
-  // 松开还原原视图；期间位移超过 8px 视为拖拽/手势，取消长按
+  // 松开还原原视图；期间位移超过 8px 视为拖拽/手势，取消长按。
+  // 触摸：双指捏合缩放（锚定双指中点）；fit 态单指横向快滑切换上/下一张
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null)
   const holdRef = useRef<{
     timer: number
@@ -299,14 +300,38 @@ export function Viewer() {
   }>({ timer: 0, button: -1, x: 0, y: 0, saved: null })
   // 最近指针位置（长按激活时重置拖拽基线用）
   const lastPtrRef = useRef({ x: 0, y: 0 })
+  // 双指捏合：起手距离/中点与当时的视图，移动时按距离比例缩放（中点锚定）
+  const pinchRef = useRef<{
+    dist: number
+    scale: number
+    offset: { x: number; y: number }
+  } | null>(null)
+  const activePtrs = useRef(new Map<number, { x: number; y: number }>())
+  // 单指滑动起手（fit 态切换判定用）
+  const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null)
   const clearHoldTimer = () => window.clearTimeout(holdRef.current.timer)
   const onPointerDown = (e: React.PointerEvent) => {
+    activePtrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    // 第二根手指落下：进入捏合，取消拖拽/长按
+    if (activePtrs.current.size === 2) {
+      clearHoldTimer()
+      dragRef.current = null
+      swipeRef.current = null
+      const [a, b] = [...activePtrs.current.values()]
+      pinchRef.current = {
+        dist: Math.hypot(b.x - a.x, b.y - a.y) || 1,
+        scale: viewRef.current.scale,
+        offset: { ...viewRef.current.offset },
+      }
+      return
+    }
     if (e.button === 0) {
       // 合成/失效指针（如自动化事件）调用 capture 会抛 NotFoundError 中断后续逻辑
       try {
         e.currentTarget.setPointerCapture(e.pointerId)
       } catch { /* 指针不可捕获时拖拽降级为无捕获模式 */ }
       dragRef.current = { x: e.clientX, y: e.clientY, ox: viewRef.current.offset.x, oy: viewRef.current.offset.y }
+      if (e.pointerType === 'touch') swipeRef.current = { x: e.clientX, y: e.clientY, t: Date.now() }
     }
     if ((e.button === 0 || e.button === 2) && natural && !isVideo) {
       clearHoldTimer()
@@ -336,12 +361,42 @@ export function Viewer() {
   }
   const onPointerMove = (e: React.PointerEvent) => {
     lastPtrRef.current = { x: e.clientX, y: e.clientY }
+    if (activePtrs.current.has(e.pointerId)) {
+      activePtrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    }
+    // 捏合中：距离比例驱动缩放，双指中点为锚（与 zoomAt 同数学）
+    const pinch = pinchRef.current
+    if (pinch && activePtrs.current.size >= 2) {
+      const el = canvasRef.current
+      if (el) {
+        const [a, b] = [...activePtrs.current.values()]
+        const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1
+        const midX = (a.x + b.x) / 2
+        const midY = (a.y + b.y) / 2
+        const rect = el.getBoundingClientRect()
+        const px = midX - rect.left - rect.width / 2
+        const py = midY - rect.top - rect.height / 2
+        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinch.scale * (dist / pinch.dist)))
+        const k = next / pinch.scale
+        setScale(next)
+        setOffset(clampOffset(next, { x: px - (px - pinch.offset.x) * k, y: py - (py - pinch.offset.y) * k }))
+      }
+      return
+    }
     const d = dragRef.current
     if (d) setOffset(clampOffset(viewRef.current.scale, { x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y }))
     const h = holdRef.current
     if (h.timer && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 8) clearHoldTimer()
   }
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    activePtrs.current.delete(e.pointerId)
+    if (pinchRef.current) {
+      // 任一指抬起即结束捏合（余指转回普通拖拽的基线已无意义，直接清）
+      if (activePtrs.current.size < 2) pinchRef.current = null
+      dragRef.current = null
+      swipeRef.current = null
+      return
+    }
     dragRef.current = null
     const h = holdRef.current
     if (h.timer) clearHoldTimer()
@@ -350,6 +405,20 @@ export function Viewer() {
       setScale(h.saved.scale)
       setOffset(clampOffset(h.saved.scale, h.saved.offset))
       h.saved = null
+      swipeRef.current = null
+      return
+    }
+    // fit 态单指横向快滑 → 切换上/下一张（放大态/视频下拖拽是平移语义）
+    const s = swipeRef.current
+    swipeRef.current = null
+    if (s && e.pointerType === 'touch' && natural) {
+      const dx = e.clientX - s.x
+      const dy = e.clientY - s.y
+      const fit = fitScale()
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5
+        && Date.now() - s.t < 600 && viewRef.current.scale <= fit * 1.001) {
+        nav(dx < 0 ? 1 : -1)
+      }
     }
   }
 
@@ -361,7 +430,7 @@ export function Viewer() {
     <div
       ref={containerRef}
       data-viewer-root
-      className="fixed inset-0 z-50 flex select-none flex-col bg-black/95 text-white cursor-grab active:cursor-grabbing"
+      className="fixed inset-0 z-50 flex touch-none select-none flex-col bg-black/95 text-white cursor-grab active:cursor-grabbing"
       onPointerDown={onPointerDown}
       onPointerMove={e => { onPointerMove(e); if (isVideo) wakeControls() }}
       onPointerUp={onPointerUp}
@@ -411,7 +480,7 @@ export function Viewer() {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" onClick={resetView} aria-label="适应窗口">
+              <Button variant="ghost" size="icon" className="hidden text-white hover:bg-white/10 hover:text-white sm:inline-flex" onClick={resetView} aria-label="适应窗口">
                 <Maximize />
               </Button>
             </TooltipTrigger>
@@ -419,7 +488,7 @@ export function Viewer() {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" onClick={() => natural && (setScale(1), setOffset({ x: 0, y: 0 }))} aria-label="原始大小">
+              <Button variant="ghost" size="icon" className="hidden text-white hover:bg-white/10 hover:text-white sm:inline-flex" onClick={() => natural && (setScale(1), setOffset({ x: 0, y: 0 }))} aria-label="原始大小">
                 <span className="text-xs font-medium">1:1</span>
               </Button>
             </TooltipTrigger>
@@ -642,11 +711,12 @@ export function Viewer() {
 
       <div className={`flex h-10 shrink-0 items-center justify-center gap-3 text-[11px] text-white/50 ${isVideo && isFullscreen ? 'hidden' : ''}`}>
         <span className="tabular-nums">{index + 1} / {files.length}</span>
-        <span>
+        <span className="hidden sm:inline">
           {isVideo
             ? '双击全屏 · 空格播放/暂停 · ←/→ 切换 · ,/. 倍速 · Esc 退出'
             : '双击关闭 · 滚轮缩放 · 拖拽平移 · 长按左键 100% · 长按右键适应 · ←/→ 切换 · 0/1 视图'}
         </span>
+        <span className="text-white/40 sm:hidden">双指缩放 · 滑动切换</span>
       </div>
     </div>
   )

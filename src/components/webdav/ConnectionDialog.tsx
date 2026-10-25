@@ -168,7 +168,7 @@ export function ConnectionDialog() {
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="col-span-1 flex flex-col gap-1 text-xs text-muted-foreground">
               名称
               <Input
